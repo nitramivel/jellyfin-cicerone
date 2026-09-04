@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Cicerone</title>
+</head>
+<body>
+<div id="CiceroneConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+
+            <style>
+                /* Jellyfin's own stylesheet carries `.readOnlyContent,form{max-width:54em}`,
+                   which caps the form but not the tab bar above it — so the row of
+                   buttons runs wider than the panel beneath, which reads as a
+                   misalignment rather than as a design. Scoped by id so nothing else
+                   on the dashboard, and no other plugin's page, is affected. */
+                #CiceroneConfigForm { max-width: none; }
+
+                .cicSaveRow { margin-bottom: 1.6em; }
+
+                /* The version badge. Its ABSENCE is the diagnostic: a config page
+                   cached from before this existed cannot render it, so a blank space
+                   next to the title means you are looking at an old page rather than
+                   at an old server. */
+                .cicVersion {
+                    font-size: 0.6em;
+                    font-weight: normal;
+                    opacity: 0.6;
+                    vertical-align: middle;
+                    margin-left: 0.5em;
+                }
+
+                /* Tabs are the one control here that is NOT an emby-button. A tab is
+                   not a raised, pressable thing — it labels which panel you are
+                   looking at — and Jellyfin's button theming fights that at every
+                   turn. The values below are Curator's, Concierge's and Colorist's,
+                   so the four plugins' settings read as one dashboard. */
+                .cicTabs {
+                    display: flex; flex-wrap: wrap; gap: 0.3em;
+                    margin: 1.4em 0 1.2em; border-bottom: 1px solid rgba(127,127,127,0.3);
+                }
+                .cicTab {
+                    background: none; border: 0; border-bottom: 2px solid transparent;
+                    color: inherit; font: inherit; font-size: 1.02em;
+                    padding: 0.5em 0.9em; cursor: pointer; opacity: 0.6;
+                    transition: opacity 0.15s, border-color 0.15s;
+                }
+                .cicTab:hover { opacity: 0.9; }
+                .cicTab.is-active { opacity: 1; border-bottom-color: currentColor; }
+                .cicPanel { display: none; }
+                .cicPanel.cicPanelActive { display: block; }
+
+                .cicNote {
+                    font-size: 0.88em; opacity: 0.7; margin: 0.35em 0 1.1em 0;
+                    line-height: 1.45;
+                }
+                .cicCard {
+                    margin-top: 1.2em; padding: 1.1em 1.2em 1.2em;
+                    border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
+                    background: rgba(255,255,255,0.035);
+                }
+                .cicCardTitle { font-weight: 600; margin-bottom: 0.5em; }
+                .cicStatusLine { font-size: 0.92em; opacity: 0.8; margin-top: 0.6em; }
+                .cicGrid {
+                    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+                    gap: 0 1.4em;
+                }
+                .cicHide { display: none !important; }
+
+                /* The profile table. A plain table rather than a list of cards: a
+                   profile is six short fields and reading four of them side by side is
+                   how you notice that two of them share a key. */
+                .cicTable { width: 100%; border-collapse: collapse; margin-top: 0.6em; }
+                .cicTable th, .cicTable td {
+                    text-align: left; padding: 0.45em 0.6em;
+                    border-bottom: 1px solid rgba(127,127,127,0.22); vertical-align: middle;
+                }
+                .cicTable th { font-weight: 600; opacity: 0.75; font-size: 0.9em; }
+                .cicTable td.cicNarrow { width: 1%; white-space: nowrap; }
+                .cicTable input, .cicTable select {
+                    width: 100%; box-sizing: border-box; padding: 0.35em 0.4em;
+                    background: rgba(255,255,255,0.06); color: inherit;
+                    border: 1px solid rgba(127,127,127,0.35); border-radius: 4px; font: inherit;
+                }
+                .cicRowButton {
+                    background: none; border: 1px solid rgba(127,127,127,0.4); border-radius: 4px;
+                    color: inherit; font: inherit; padding: 0.3em 0.7em; cursor: pointer;
+                }
+                .cicRowButton:hover { background: rgba(255,255,255,0.08); }
+                .cicDefaultCell { text-align: center; }
+
+                /* Run progress. Colours come from the Jellyfin accent rather than
+                   hard-coded brand values, so this sits inside whichever dashboard
+                   theme is active instead of fighting it. */
+                .cicProgressHead {
+                    display: flex; justify-content: space-between; align-items: baseline;
+                    font-size: 0.92em; margin-bottom: 0.4em;
+                }
+                .cicProgressBar {
+                    height: 6px; border-radius: 3px; overflow: hidden;
+                    background: rgba(127,127,127,0.25);
+                }
+                .cicProgressFill {
+                    height: 100%; width: 0; background: #00a4dc;
+                    transition: width 0.4s ease;
+                }
+                .cicProgressItem {
+                    font-size: 0.88em; opacity: 0.75; margin-top: 0.5em;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                }
+
+                /* Verdict pills. Colour carries meaning here rather than decoration —
+                   a coverage table is scanned, not read — so the four states a viewer
+                   would actually experience differently get four hues, and everything
+                   Cicerone could not decide shares the neutral one. */
+                .cicPill {
+                    display: inline-block; padding: 0.12em 0.6em; border-radius: 999px;
+                    font-size: 0.82em; font-weight: 600; white-space: nowrap;
+                    border: 1px solid currentColor;
+                }
+                .cicPill.cicInSync { color: #4caf50; }
+                .cicPill.cicOffset { color: #ffb300; }
+                .cicPill.cicDrifting { color: #ff7043; }
+                .cicPill.cicMismatched { color: #ef5350; }
+                .cicPill.cicWrongLanguage { color: #ab47bc; }
+                .cicPill.cicUnknown, .cicPill.cicNoDialogue { color: #9e9e9e; }
+                .cicPill.cicMissing { color: #78909c; }
+
+                .cicTally { display: flex; flex-wrap: wrap; gap: 0.6em 1.4em; margin: 0.8em 0 0.2em; }
+                .cicTallyItem { font-size: 0.92em; }
+                .cicTallyCount { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+                .cicScroll { max-height: 26em; overflow-y: auto; margin-top: 0.6em; }
+                .cicMono { font-variant-numeric: tabular-nums; }
+                .cicRight { text-align: right; }
+            </style>
+
+            <h2 class="sectionTitle">
+                Cicerone<span id="CiceroneVersion" class="cicVersion"></span>
+            </h2>
+            <div class="cicNote" style="margin-bottom:0">
+                Checks that a subtitle track is the language it claims to be and is timed to the dialogue it
+                sits over &mdash; by cutting real audio out of the file at several points and listening to it.
+            </div>
+
+            <div class="cicTabs" role="tablist">
+                <button type="button" class="cicTab is-active" role="tab" data-panel="models">Models</button>
+                <button type="button" class="cicTab" role="tab" data-panel="languages">Languages</button>
+                <button type="button" class="cicTab" role="tab" data-panel="sync">Sync</button>
+                <button type="button" class="cicTab" role="tab" data-panel="repair">Repair</button>
+                <button type="button" class="cicTab" role="tab" data-panel="run">Run</button>
+                <button type="button" class="cicTab" role="tab" data-panel="report">Report</button>
+            </div>
+
+            <form id="CiceroneConfigForm">
+
+                <!-- Above the panels rather than below them. A submit button works
+                     from anywhere inside the form, so its position is purely a
+                     question of where a hand reaches for it — and at the bottom it is
+                     a scroll away from wherever the change was just made. -->
+                <div id="CiceroneSaveRow" class="cicSaveRow">
+                    <button is="emby-button" type="submit" class="emby-button raised button-submit block">
+                        <span>Save</span>
+                    </button>
+                </div>
+
+                <!-- ================= MODELS ================= -->
+                <div class="cicPanel cicPanelActive" data-panel="models">
+
+                    <div class="cicNote">
+                        Cicerone needs a <strong>timed</strong> transcript, not a good one &mdash; the whole
+                        output is a comparison between when a word was said and when the subtitle claims it was.
+                        That rules out more models than it sounds like it should:
+                        <strong>gpt-4o-transcribe</strong> and its mini return an excellent transcript with no
+                        timings in it and are useless here. <strong>whisper-1</strong> is the right choice, and
+                        happens to be the cheap one.
+                        <br /><br />
+                        Anything speaking OpenAI's <code>/audio/transcriptions</code> endpoint works &mdash;
+                        Speaches, faster-whisper-server, whisper.cpp's server, LM Studio, Groq. Pointed at a
+                        local one, no audio leaves your network and the whole thing is free.
+                    </div>
+
+                    <table class="cicTable" id="ProfileTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Provider</th>
+                                <th>Model</th>
+                                <th>API key</th>
+                                <th>Base URL</th>
+                                <th>$/audio min</th>
+                                <th class="cicNarrow">Default</th>
+                                <th class="cicNarrow"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="ProfileRows"></tbody>
+                    </table>
+
+                    <div style="margin-top:0.8em; display:flex; gap:0.6em; flex-wrap:wrap;">
+                        <button type="button" is="emby-button" class="emby-button raised" id="AddProfile">
+                            <span>Add a profile</span>
+                        </button>
+                        <button type="button" is="emby-button" class="emby-button raised" id="TestProfile">
+                            <span>Test the default profile</span>
+                        </button>
+                    </div>
+                    <div id="TestResult" class="cicStatusLine"></div>
+
+                    <div class="cicCard">
+                        <div class="cicCardTitle">Per-profile options</div>
+                        <div class="cicGrid">
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="HintLanguage" />
+                                    <span>Tell the transcriber which language to expect</span>
+                                </label>
+                                <div class="fieldDescription cicNote">
+                                    On by default, and it matters more than it sounds. Told the language, Whisper
+                                    transcribes; left to guess, it sometimes <em>translates</em> &mdash; and a
+                                    Spanish clip returned as English words shares nothing with the Spanish
+                                    subtitle track being checked, so a correctly synced file is reported as a
+                                    different film.
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="TimeoutSeconds">Request timeout (seconds)</label>
+                                <input is="emby-input" type="number" id="TimeoutSeconds" class="emby-input"
+                                       min="10" max="900" step="10" />
+                                <div class="fieldDescription cicNote">
+                                    Generous on purpose: a local whisper.cpp server on a CPU can take most of a
+                                    minute over a thirty-second clip, and that is a slow success rather than a
+                                    failure.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="cicNote" style="margin-bottom:0">
+                            These two apply to the default profile. Prices are per <strong>minute of audio</strong>
+                            rather than per token, because minutes are what Cicerone controls exactly &mdash; the
+                            anchor count and window length decide the bill before a single call is made.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= LANGUAGES ================= -->
+                <div class="cicPanel" data-panel="languages">
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="PreferredLanguages">Languages you want, best first</label>
+                        <input is="emby-input" type="text" id="PreferredLanguages" class="emby-input"
+                               placeholder="en, es" />
+                        <div class="fieldDescription cicNote">
+                            Comma-separated, in preference order. <strong>This is the setting the whole plugin is
+                            arranged around:</strong> it decides which tracks are worth spending audio on, which
+                            audio track each one is checked against, and which language an item is reported as
+                            missing.
+                            <br /><br />
+                            Leaving it empty means every track in the library &mdash; which on a disc rip with
+                            sixteen language tracks is sixteen times the bill for fifteen answers nobody wanted.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="VerifyLanguage" />
+                            <span>Check that each track is written in the language it claims</span>
+                        </label>
+                        <div class="fieldDescription cicNote">
+                            <strong>Free, and it runs first.</strong> A track tagged English and written in
+                            Spanish is a common and completely invisible fault &mdash; the player shows the
+                            language you picked, the words are wrong, and no amount of sync checking explains it.
+                            Asking a model would cost a call per track to answer the one question here that a few
+                            hundred bytes of table answers exactly, so it is answered locally, for nothing, before
+                            any audio is touched.
+                            <br /><br />
+                            It is deliberately reluctant: the tag has to be beaten by a clear margin, not merely
+                            beaten, and an untagged track is never contradicted at all because it never made a
+                            claim.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= SYNC ================= -->
+                <div class="cicPanel" data-panel="sync">
+
+                    <div class="cicNote">
+                        <strong>One measurement is worse than none.</strong> A single-point check reports a
+                        frame-rate-mismatched file as perfect, because it <em>is</em> perfect wherever you
+                        happened to look &mdash; and now you believe it. Two anchors is the minimum that can see a
+                        drift at all; five is what makes the answer survive one of them landing in a silence.
+                    </div>
+
+                    <div class="cicGrid">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnchorCount">Windows per item</label>
+                            <input is="emby-input" type="number" id="AnchorCount" class="emby-input"
+                                   min="1" max="20" step="1" />
+                            <div class="fieldDescription cicNote">
+                                Below 2, drift cannot be measured and the report says so rather than claiming
+                                there is none.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AnchorWindowSeconds">Seconds per window</label>
+                            <input is="emby-input" type="number" id="AnchorWindowSeconds" class="emby-input"
+                                   min="5" max="120" step="5" />
+                            <div class="fieldDescription cicNote">
+                                Together with the count, this is the entire bill: five thirty-second windows is
+                                two and a half minutes of audio whether the item is a twenty-minute episode or a
+                                three-hour film.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="MaxOffsetSeconds">How far out a track might be (seconds)</label>
+                        <input is="emby-input" type="number" id="MaxOffsetSeconds" class="emby-input"
+                               min="5" max="900" step="5" />
+                        <div class="fieldDescription cicNote">
+                            The search range, and it is not free to raise: every extra second widens the field of
+                            word pairings considered, and the wrong ones are noise. 120 covers everything short of
+                            a subtitle file for a different release &mdash; and beyond that the answer wanted is
+                            "this is the wrong file", which arrives as a mismatch either way.
+                        </div>
+                    </div>
+
+                    <div class="cicGrid">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="HeadTrimPercent">Skip at start (%)</label>
+                            <input is="emby-input" type="number" id="HeadTrimPercent" class="emby-input"
+                                   min="0" max="45" step="0.5" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TailTrimPercent">Skip at end (%)</label>
+                            <input is="emby-input" type="number" id="TailTrimPercent" class="emby-input"
+                                   min="0" max="45" step="0.5" />
+                        </div>
+                    </div>
+                    <div class="cicNote">
+                        Distributor logos and a cold open at one end, a credit crawl at the other &mdash; the two
+                        parts of a film least likely to contain plain dialogue. The head is also where a ripper's
+                        signature sits, which is the most distinctive text in a subtitle file and belongs to
+                        nobody in the cast.
+                    </div>
+
+                    <div class="cicGrid">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="ToleranceSeconds">In sync within (seconds)</label>
+                            <input is="emby-input" type="number" id="ToleranceSeconds" class="emby-input"
+                                   min="0.05" max="5" step="0.05" />
+                            <div class="fieldDescription cicNote">
+                                About where a viewer starts to notice a subtitle arriving before the mouth moves.
+                                Below that, the measurement's own error is the larger number anyway.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MaxResidualSeconds">Call it mismatched beyond (seconds)</label>
+                            <input is="emby-input" type="number" id="MaxResidualSeconds" class="emby-input"
+                                   min="0.2" max="30" step="0.1" />
+                            <div class="fieldDescription cicNote">
+                                How far the windows may disagree with one another before the straight line through
+                                them is disbelieved. Anchors that each measure something real and lie on no single
+                                line is what a subtitle file for a different cut looks like.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="SnapFrameRates" />
+                            <span>Recognise frame rate mismatches</span>
+                        </label>
+                        <div class="fieldDescription cicNote">
+                            <strong>The most common way a subtitle file is wrong, and the hardest to see.</strong>
+                            A file timed against a 25&nbsp;fps PAL transfer, played over a 23.976&nbsp;fps source,
+                            is perfect on the first line and four minutes adrift by the end. Anyone who has nudged
+                            an offset until the opening scene matched and found it broken again an hour later has
+                            met this.
+                            <br /><br />
+                            A measured drift of 1.0427 is not a number worth keeping when what it means is
+                            25/23.976. Snapping to the exact ratio makes a repair correct for the whole runtime
+                            instead of accumulating the fit's own error across three hours, and it lets the report
+                            name the fault rather than print a slope.
+                        </div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="ClipFormat">Send audio as</label>
+                        <select is="emby-select" id="ClipFormat" class="emby-select-withcolor emby-select">
+                            <option value="Opus">Opus in Ogg (smallest)</option>
+                            <option value="Mp3">MP3</option>
+                            <option value="Wav">WAV (uncompressed)</option>
+                        </select>
+                        <div class="fieldDescription cicNote">
+                            All three are resampled to 16&nbsp;kHz mono first, which is what speech models are
+                            trained on and what they would resample to anyway. Opus at 16&nbsp;kbit/s is about
+                            60&nbsp;KB for a thirty-second window and transparent for speech. Choose WAV for a
+                            local server that would rather not decode.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= REPAIR ================= -->
+                <div class="cicPanel" data-panel="repair">
+
+                    <div class="cicNote">
+                        <strong>Cicerone never edits a subtitle file.</strong> A correction is a measurement,
+                        measurements have error, and the failure mode of editing in place is destroying a file
+                        somebody spent an evening timing by hand. A repair is always a new file beside the
+                        original, named so that Jellyfin reads the language back out of it and so that nothing
+                        here will ever overwrite a file it did not write.
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="RepairMode">When a track is out of sync</label>
+                        <select is="emby-select" id="RepairMode" class="emby-select-withcolor emby-select">
+                            <option value="Off">Report it and do nothing</option>
+                            <option value="WriteSidecar">Write a corrected copy beside the media</option>
+                            <option value="WriteSidecarAndRefresh">Write it and rescan so Jellyfin picks it up</option>
+                        </select>
+                        <div class="fieldDescription cicNote">
+                            Reporting only is the default. Look at what a first run finds before letting it write
+                            anything &mdash; a library where every item reads as mismatched usually means a
+                            misconfigured transcriber, not two hundred broken subtitle files.
+                        </div>
+                    </div>
+
+                    <div class="cicGrid">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MinErrorToRepairSeconds">Only repair beyond (seconds)</label>
+                            <input is="emby-input" type="number" id="MinErrorToRepairSeconds" class="emby-input"
+                                   min="0.1" max="30" step="0.1" />
+                            <div class="fieldDescription cicNote">
+                                Above the in-sync tolerance on purpose. Between the two sits a band where the
+                                track is imperfect and rewriting it would move the timings by less than the
+                                measurement's own error &mdash; which is not a repair, it is a coin toss that
+                                leaves a second file in the folder.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MinConfidenceToRepair">Only repair above confidence</label>
+                            <input is="emby-input" type="number" id="MinConfidenceToRepair" class="emby-input"
+                                   min="0" max="1" step="0.05" />
+                            <div class="fieldDescription cicNote">
+                                Averaged over the windows that actually matched, and at least two of them. A
+                                window that produced nothing is silence rather than disagreement, and letting it
+                                drag the average down would block repairs on quiet films.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="RepairSuffix">Marker in the file name</label>
+                        <input is="emby-input" type="text" id="RepairSuffix" class="emby-input" />
+                        <div class="fieldDescription cicNote">
+                            A repair lands as <code>Film&nbsp;(2019).en.cicerone.srt</code> &mdash; stem, language,
+                            then this. Jellyfin reads the language from the name and offers it as a selectable
+                            track; the marker is what makes Cicerone's own output identifiable, so it is never
+                            allowed to be empty.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="WriteBesideMedia" />
+                            <span>Write repairs beside the media file</span>
+                        </label>
+                        <div class="fieldDescription cicNote">
+                            Beside the media is the only place Jellyfin will pick a subtitle file up from, so
+                            turning this off means the repair exists and no player can see it. It stays a setting
+                            because a read-only library is a real arrangement, and a repair in the plugin's data
+                            directory is still something you can copy out by hand. Read-only folders fall back
+                            there automatically, and the report says which happened.
+                        </div>
+                    </div>
+
+                    <div class="cicNote">
+                        Clearing the stored reports does <strong>not</strong> delete repaired files. Those are
+                        files in your library folders, and removing them is a decision to make with a file
+                        manager rather than a side effect of clearing a cache.
+                    </div>
+                </div>
+
+                <!-- ================= RUN ================= -->
+                <div class="cicPanel" data-panel="run">
+
+                    <div class="cicGrid">
+                        <div class="checkboxContainer">
+                            <label class="emby-checkbox-label">
+                                <input is="emby-checkbox" type="checkbox" id="IncludeMovies" />
+                                <span>Check movies</span>
+                            </label>
+                        </div>
+                        <div class="checkboxContainer">
+                            <label class="emby-checkbox-label">
+                                <input is="emby-checkbox" type="checkbox" id="IncludeEpisodes" />
+                                <span>Check episodes</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="cicNote">
+                        Episodes are off by default, and the reason is arithmetic rather than taste. A library of
+                        200 films is 200 items; the same library's television is often ten thousand, and every one
+                        of them costs the same two and a half minutes of audio. Turn it on deliberately, after
+                        seeing what films cost.
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="RecheckExisting" />
+                            <span>Check items that have already been checked</span>
+                        </label>
+                        <div class="fieldDescription cicNote">
+                            Off by default, so a run picks up only what is new or has changed. Staleness is keyed
+                            on the media file's size and modification time, so a second run over an unchanged
+                            library is free and a replaced release is re-checked without anybody having to
+                            remember that it was replaced. Turn this on after changing the anchor settings, or
+                            nothing will be revisited.
+                        </div>
+                    </div>
+
+                    <div class="cicGrid">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="AudioMinuteBudget">Audio budget per run (minutes)</label>
+                            <input is="emby-input" type="number" id="AudioMinuteBudget" class="emby-input"
+                                   min="0" max="100000" step="10" />
+                            <div class="fieldDescription cicNote">
+                                The one setting standing between a first run over an unexamined library and a bill
+                                nobody agreed to. In minutes of audio rather than dollars because minutes are what
+                                Cicerone can count exactly and prices change underneath it. 0 removes the ceiling.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MaxConcurrency">Items at once</label>
+                            <input is="emby-input" type="number" id="MaxConcurrency" class="emby-input"
+                                   min="0" max="16" step="1" />
+                            <div class="fieldDescription cicNote">
+                                0 works it out. Raising this multiplies calls to your transcriber as well as
+                                ffmpeg processes, so a hosted endpoint's rate limit is usually the real ceiling
+                                rather than the machine.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cicCard">
+                        <div class="cicCardTitle">What a full run would cost</div>
+                        <div class="cicNote" style="margin-bottom:0.5em">
+                            Exact rather than indicative, which is the payoff of listening to a few windows instead
+                            of transcribing whole files: the audio a run will send is decided by the two settings
+                            on the Sync tab, so this is arithmetic and not a projection. Save first &mdash; it is
+                            costed against what the server has, not what is typed above.
+                        </div>
+                        <button type="button" is="emby-button" class="emby-button raised" id="EstimateRun">
+                            <span>Work it out</span>
+                        </button>
+                        <div id="EstimateResult" class="cicStatusLine"></div>
+                    </div>
+
+                    <div class="cicCard">
+                        <div class="cicCardTitle">Run now</div>
+                        <div class="cicNote" style="margin-bottom:0.5em">
+                            The <strong>Verify Subtitles</strong> scheduled task does the same thing and ships with
+                            <strong>no default schedule</strong> &mdash; it is the only task here that spends money
+                            the first time it fires. Set one under
+                            <strong>Dashboard &rarr; Scheduled Tasks</strong> once the bill is a known quantity.
+                        </div>
+                        <div style="display:flex; gap:0.6em; flex-wrap:wrap;">
+                            <button type="button" is="emby-button" class="emby-button raised" id="StartRun">
+                                <span>Check the whole library</span>
+                            </button>
+                        </div>
+                        <div id="RunResult" class="cicStatusLine"></div>
+
+                        <div id="RunProgress" class="cicHide" style="margin-top:1em">
+                            <div class="cicProgressHead">
+                                <span id="ProgressLabel">Starting&hellip;</span>
+                                <span id="ProgressRight" class="cicMono"></span>
+                            </div>
+                            <div class="cicProgressBar"><div id="ProgressFill" class="cicProgressFill"></div></div>
+                            <div id="ProgressItem" class="cicProgressItem"></div>
+                        </div>
+                    </div>
+
+                    <div class="cicCard">
+                        <div class="cicCardTitle">Try one item</div>
+                        <div class="cicNote" style="margin-bottom:0.5em">
+                            The button to press before turning any of this loose on a library. Paste an item ID
+                            &mdash; it is in the URL when you open a film in the web client &mdash; and this checks
+                            it now and shows what came back. Costs one item's worth of audio.
+                        </div>
+                        <div style="display:flex; gap:0.6em; flex-wrap:wrap; align-items:center;">
+                            <input is="emby-input" type="text" id="OneItemId" class="emby-input"
+                                   placeholder="item id" style="max-width:22em" />
+                            <button type="button" is="emby-button" class="emby-button raised" id="CheckOne">
+                                <span>Check it</span>
+                            </button>
+                        </div>
+                        <div id="OneItemResult" class="cicStatusLine"></div>
+                    </div>
+
+                    <div class="cicCard">
+                        <div class="cicCardTitle">Recent runs</div>
+                        <div id="RecentRuns" class="cicStatusLine">Nothing yet.</div>
+                    </div>
+                </div>
+
+                <!-- ================= REPORT ================= -->
+                <div class="cicPanel" data-panel="report">
+
+                    <div class="cicNote">
+                        Counted on the <strong>best</strong> track per language rather than on every track, because
+                        that is the one a viewer will actually be shown. An item holding one perfect English track
+                        and three broken ones is covered; tallying all four would report it as a quarter working.
+                    </div>
+
+                    <div style="display:flex; gap:0.6em; flex-wrap:wrap; align-items:center;">
+                        <button type="button" is="emby-button" class="emby-button raised" id="RefreshReport">
+                            <span>Refresh</span>
+                        </button>
+                        <select is="emby-select" id="VerdictFilter" class="emby-select-withcolor emby-select"
+                                style="max-width:18em">
+                            <option value="">Everything</option>
+                            <option value="InSync">In sync</option>
+                            <option value="Offset">Out by a constant</option>
+                            <option value="Drifting">Drifting</option>
+                            <option value="Mismatched">Not this dialogue</option>
+                            <option value="WrongLanguage">Wrong language</option>
+                            <option value="NoDialogue">Nothing to check</option>
+                            <option value="Unknown">Undecided</option>
+                        </select>
+                        <button type="button" is="emby-button" class="emby-button raised" id="ClearReports">
+                            <span>Forget everything</span>
+                        </button>
+                    </div>
+
+                    <div id="CoverageTally" class="cicTally"></div>
+                    <div id="CoverageNote" class="cicNote"></div>
+
+                    <div class="cicScroll">
+                        <table class="cicTable">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Track</th>
+                                    <th>Verdict</th>
+                                    <th class="cicRight">Worst error</th>
+                                    <th>Why</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ReportRows"></tbody>
+                        </table>
+                    </div>
+                    <div id="ReportEmpty" class="cicStatusLine">Nothing checked yet.</div>
+                </div>
+
+            </form>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '83004bd9-e2d6-4e13-9f3a-73bb12ef1f96';
+            var page = document.querySelector('#CiceroneConfigPage');
+
+            /*
+             * Jellyfin serialises enums as their NAMES — RepairMode comes back as
+             * "WriteSidecar" — so the numbers a page might assign match no option and
+             * leave the control blank, which then saves garbage over the setting on
+             * the next submit. Numbers are still accepted in this direction because a
+             * configuration written by hand into the XML on disk can hold one; the
+             * server reads names, numbers and numeric strings alike, so only reading
+             * ever needed fixing.
+             */
+            function enumName(value, names, fallback) {
+                var text = value === null || value === undefined ? '' : String(value);
+
+                if (/^\d+$/.test(text)) {
+                    return names[parseInt(text, 10)] || fallback;
+                }
+
+                return names.indexOf(text) >= 0 ? text : fallback;
+            }
+
+            var PROVIDERS = ['OpenAi', 'OpenAiCompatible', 'Google'];
+            var CLIP_FORMATS = ['Opus', 'Mp3', 'Wav'];
+            var REPAIR_MODES = ['Off', 'WriteSidecar', 'WriteSidecarAndRefresh'];
+
+            var VERDICTS = [
+                'InSync', 'Offset', 'Drifting', 'Mismatched', 'WrongLanguage', 'NoDialogue', 'Unknown'
+            ];
+
+            var VERDICT_LABELS = {
+                InSync: 'In sync',
+                Offset: 'Out by a constant',
+                Drifting: 'Drifting',
+                Mismatched: 'Not this dialogue',
+                WrongLanguage: 'Wrong language',
+                NoDialogue: 'Nothing to check',
+                Unknown: 'Undecided'
+            };
+
+            function num(selector, fallback) {
+                var value = parseFloat(page.querySelector(selector).value);
+                return isNaN(value) ? fallback : value;
+            }
+
+            function text(value) {
+                return value === null || value === undefined ? '' : String(value);
+            }
+
+            /* textContent everywhere this can be helped. Item names, track titles and
+               provider error strings all come off the wire, and there is no reason for
+               any of them ever to be parsed as markup. */
+            function cell(row, value, className) {
+                var td = document.createElement('td');
+                td.textContent = text(value);
+                if (className) {
+                    td.className = className;
+                }
+                row.appendChild(td);
+                return td;
+            }
+
+            function pill(verdict) {
+                var span = document.createElement('span');
+                span.className = 'cicPill cic' + text(verdict);
+                span.textContent = VERDICT_LABELS[verdict] || text(verdict);
+                return span;
+            }
+
+            function seconds(value) {
+                var n = Number(value);
+                if (!isFinite(n) || n === 0) {
+                    return '—';
+                }
+
+                return (n >= 0 ? '' : '−') + Math.abs(n).toFixed(1) + 's';
+            }
+
+            function duration(totalSeconds) {
+                var s = Math.max(0, Math.round(Number(totalSeconds) || 0));
+                var h = Math.floor(s / 3600);
+                var m = Math.floor((s % 3600) / 60);
+
+                if (h > 0) {
+                    return h + 'h ' + m + 'm';
+                }
+
+                return m > 0 ? m + 'm ' + (s % 60) + 's' : s + 's';
+            }
+
+            /* ---------------------------------------------------------------- tabs */
+
+            function switchTab(name) {
+                var tabs = page.querySelectorAll('.cicTab');
+                var i;
+
+                for (i = 0; i < tabs.length; i++) {
+                    var active = tabs[i].getAttribute('data-panel') === name;
+                    tabs[i].classList.toggle('is-active', active);
+                    tabs[i].setAttribute('aria-selected', active ? 'true' : 'false');
+                }
+
+                var panels = page.querySelectorAll('.cicPanel');
+                for (i = 0; i < panels.length; i++) {
+                    panels[i].classList.toggle(
+                        'cicPanelActive', panels[i].getAttribute('data-panel') === name);
+                }
+            }
+
+            /* ------------------------------------------------------------- version */
+
+            /*
+             * Shows which plugin version is actually running.
+             *
+             * The point is not the number, it is that a page served from a browser
+             * cache predating this renders nothing here — so a missing badge says
+             * "you are looking at a stale page", which is otherwise invisible and easy
+             * to mistake for a server that did not pick up the new build.
+             */
+            function showVersion() {
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Version'),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    if (payload && payload.Version) {
+                        page.querySelector('#CiceroneVersion').textContent = 'v' + payload.Version;
+                    }
+                }, function () { });
+            }
+
+            /* ------------------------------------------------------------ profiles */
+
+            /*
+             * Profiles are held in a JS array and re-rendered, rather than read back
+             * out of the DOM on save. The id has to survive renaming and reordering —
+             * DefaultProfileId points at it — so nothing may key a profile by its name
+             * or its row position, both of which the owner can change at will.
+             */
+            var profiles = [];
+            var defaultProfileId = '';
+
+            function newId() {
+                var bytes = new Uint8Array(8);
+                (window.crypto || window.msCrypto).getRandomValues(bytes);
+
+                return Array.prototype.map.call(bytes, function (b) {
+                    return ('0' + b.toString(16)).slice(-2);
+                }).join('');
+            }
+
+            function renderProfiles() {
+                var body = page.querySelector('#ProfileRows');
+                body.innerHTML = '';
+
+                if (profiles.length === 0) {
+                    var empty = document.createElement('tr');
+                    var td = document.createElement('td');
+                    td.colSpan = 8;
+                    td.className = 'cicNote';
+                    td.style.paddingTop = '1em';
+                    td.textContent = 'No profiles yet. Add one — whisper-1 on OpenAI, or a local '
+                        + 'whisper server at a base URL, are the two that need no thinking about.';
+                    empty.appendChild(td);
+                    body.appendChild(empty);
+                    return;
+                }
+
+                profiles.forEach(function (profile, index) {
+                    var row = document.createElement('tr');
+
+                    row.appendChild(field('text', profile.Name, function (v) { profile.Name = v; }));
+                    row.appendChild(select(PROVIDERS, profile.Provider, function (v) {
+                        profile.Provider = v;
+                    }, {
+                        OpenAi: 'OpenAI',
+                        OpenAiCompatible: 'OpenAI-compatible',
+                        Google: 'Google'
+                    }));
+                    row.appendChild(field('text', profile.Model, function (v) { profile.Model = v; }));
+                    row.appendChild(field('password', profile.ApiKey, function (v) { profile.ApiKey = v; }));
+                    row.appendChild(field('text', profile.BaseUrl, function (v) { profile.BaseUrl = v; }));
+                    row.appendChild(field('number', profile.CostPerAudioMinute, function (v) {
+                        profile.CostPerAudioMinute = parseFloat(v) || 0;
+                    }));
+
+                    var defaultCell = document.createElement('td');
+                    defaultCell.className = 'cicNarrow cicDefaultCell';
+                    var radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'CiceroneDefaultProfile';
+                    radio.checked = profile.Id === defaultProfileId;
+                    radio.addEventListener('change', function () {
+                        defaultProfileId = profile.Id;
+                    });
+                    defaultCell.appendChild(radio);
+                    row.appendChild(defaultCell);
+
+                    var actions = document.createElement('td');
+                    actions.className = 'cicNarrow';
+                    var remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'cicRowButton';
+                    remove.textContent = 'Remove';
+                    remove.addEventListener('click', function () {
+                        profiles.splice(index, 1);
+
+                        // A default pointing at a profile that no longer exists would
+                        // silently fall through to the first one on the server. Better
+                        // to make that choice visible here than to have it made.
+                        if (!profiles.some(function (p) { return p.Id === defaultProfileId; })) {
+                            defaultProfileId = profiles.length > 0 ? profiles[0].Id : '';
+                        }
+
+                        renderProfiles();
+                    });
+                    actions.appendChild(remove);
+                    row.appendChild(actions);
+
+                    body.appendChild(row);
+                });
+            }
+
+            function field(type, value, onChange) {
+                var td = document.createElement('td');
+                var input = document.createElement('input');
+                input.type = type;
+                input.value = text(value);
+
+                if (type === 'number') {
+                    input.step = '0.0001';
+                    input.min = '0';
+                }
+
+                if (type === 'password') {
+                    input.autocomplete = 'new-password';
+                }
+
+                input.addEventListener('input', function () { onChange(input.value); });
+                td.appendChild(input);
+                return td;
+            }
+
+            function select(values, current, onChange, labels) {
+                var td = document.createElement('td');
+                var picker = document.createElement('select');
+
+                values.forEach(function (value) {
+                    var option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = (labels && labels[value]) || value;
+                    picker.appendChild(option);
+                });
+
+                picker.value = enumName(current, values, values[0]);
+                picker.addEventListener('change', function () { onChange(picker.value); });
+                td.appendChild(picker);
+                return td;
+            }
+
+            /* ------------------------------------------------------------ load/save */
+
+            function load() {
+                Dashboard.showLoadingMsg();
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    profiles = (config.Profiles || []).map(function (p) {
+                        return {
+                            Id: p.Id || newId(),
+                            Name: p.Name || '',
+                            Provider: enumName(p.Provider, PROVIDERS, 'OpenAi'),
+                            Model: p.Model || '',
+                            ApiKey: p.ApiKey || '',
+                            BaseUrl: p.BaseUrl || '',
+                            CostPerAudioMinute: p.CostPerAudioMinute || 0,
+                            HintLanguage: p.HintLanguage !== false,
+                            TimeoutSeconds: p.TimeoutSeconds || 180
+                        };
+                    });
+
+                    defaultProfileId = config.DefaultProfileId || (profiles[0] ? profiles[0].Id : '');
+                    renderProfiles();
+
+                    var current = profiles.filter(function (p) { return p.Id === defaultProfileId; })[0]
+                        || profiles[0];
+
+                    page.querySelector('#HintLanguage').checked = current ? current.HintLanguage !== false : true;
+                    page.querySelector('#TimeoutSeconds').value = current ? current.TimeoutSeconds : 180;
+
+                    page.querySelector('#PreferredLanguages').value = config.PreferredLanguages || '';
+                    page.querySelector('#VerifyLanguage').checked = config.VerifyLanguage !== false;
+
+                    page.querySelector('#AnchorCount').value = config.AnchorCount;
+                    page.querySelector('#AnchorWindowSeconds').value = config.AnchorWindowSeconds;
+                    page.querySelector('#MaxOffsetSeconds').value = config.MaxOffsetSeconds;
+                    page.querySelector('#HeadTrimPercent').value = config.HeadTrimPercent;
+                    page.querySelector('#TailTrimPercent').value = config.TailTrimPercent;
+                    page.querySelector('#ToleranceSeconds').value = config.ToleranceSeconds;
+                    page.querySelector('#MaxResidualSeconds').value = config.MaxResidualSeconds;
+                    page.querySelector('#SnapFrameRates').checked = config.SnapFrameRates !== false;
+                    page.querySelector('#ClipFormat').value = enumName(config.ClipFormat, CLIP_FORMATS, 'Opus');
+
+                    page.querySelector('#RepairMode').value = enumName(config.RepairMode, REPAIR_MODES, 'Off');
+                    page.querySelector('#MinErrorToRepairSeconds').value = config.MinErrorToRepairSeconds;
+                    page.querySelector('#MinConfidenceToRepair').value = config.MinConfidenceToRepair;
+                    page.querySelector('#RepairSuffix').value = config.RepairSuffix || 'cicerone';
+                    page.querySelector('#WriteBesideMedia').checked = config.WriteBesideMedia !== false;
+
+                    page.querySelector('#IncludeMovies').checked = config.IncludeMovies !== false;
+                    page.querySelector('#IncludeEpisodes').checked = !!config.IncludeEpisodes;
+                    page.querySelector('#RecheckExisting').checked = !!config.RecheckExisting;
+                    page.querySelector('#MaxConcurrency').value = config.MaxConcurrency || 0;
+                    page.querySelector('#AudioMinuteBudget').value =
+                        config.AudioMinuteBudget === undefined ? 240 : config.AudioMinuteBudget;
+
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function save() {
+                Dashboard.showLoadingMsg();
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    var hint = page.querySelector('#HintLanguage').checked;
+                    var timeout = num('#TimeoutSeconds', 180);
+
+                    config.Profiles = profiles.map(function (p) {
+                        return {
+                            Id: p.Id,
+                            Name: p.Name,
+                            Provider: p.Provider,
+                            Model: p.Model,
+                            ApiKey: p.ApiKey,
+                            BaseUrl: p.BaseUrl,
+                            CostPerAudioMinute: p.CostPerAudioMinute,
+
+                            // The two per-profile options above the table edit whichever
+                            // profile is currently default. Writing them to every profile
+                            // would be wrong, and giving each row two more columns makes
+                            // the table unreadable at the width a dashboard panel has.
+                            HintLanguage: p.Id === defaultProfileId ? hint : p.HintLanguage !== false,
+                            TimeoutSeconds: p.Id === defaultProfileId ? timeout : (p.TimeoutSeconds || 180)
+                        };
+                    });
+
+                    config.DefaultProfileId = defaultProfileId;
+
+                    config.PreferredLanguages = page.querySelector('#PreferredLanguages').value;
+                    config.VerifyLanguage = page.querySelector('#VerifyLanguage').checked;
+
+                    config.AnchorCount = num('#AnchorCount', 5);
+                    config.AnchorWindowSeconds = num('#AnchorWindowSeconds', 30);
+                    config.MaxOffsetSeconds = num('#MaxOffsetSeconds', 120);
+                    config.HeadTrimPercent = num('#HeadTrimPercent', 5);
+                    config.TailTrimPercent = num('#TailTrimPercent', 8);
+                    config.ToleranceSeconds = num('#ToleranceSeconds', 0.35);
+                    config.MaxResidualSeconds = num('#MaxResidualSeconds', 1.5);
+                    config.SnapFrameRates = page.querySelector('#SnapFrameRates').checked;
+
+                    // Sent as the name, which is what the server sends back. It reads
+                    // names, numbers and numeric strings, so this is the one form
+                    // guaranteed to survive the round trip unchanged.
+                    config.ClipFormat = page.querySelector('#ClipFormat').value;
+
+                    config.RepairMode = page.querySelector('#RepairMode').value;
+                    config.MinErrorToRepairSeconds = num('#MinErrorToRepairSeconds', 0.6);
+                    config.MinConfidenceToRepair = num('#MinConfidenceToRepair', 0.4);
+                    config.RepairSuffix = page.querySelector('#RepairSuffix').value || 'cicerone';
+                    config.WriteBesideMedia = page.querySelector('#WriteBesideMedia').checked;
+
+                    config.IncludeMovies = page.querySelector('#IncludeMovies').checked;
+                    config.IncludeEpisodes = page.querySelector('#IncludeEpisodes').checked;
+                    config.RecheckExisting = page.querySelector('#RecheckExisting').checked;
+                    config.MaxConcurrency = num('#MaxConcurrency', 0);
+                    config.AudioMinuteBudget = num('#AudioMinuteBudget', 240);
+
+                    return ApiClient.updatePluginConfiguration(pluginId, config);
+                }).then(function (result) {
+                    Dashboard.processPluginConfigurationUpdateResult(result);
+                }, function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Cicerone settings could not be saved.');
+                });
+            }
+
+            /* --------------------------------------------------------------- tests */
+
+            function testProfile() {
+                var result = page.querySelector('#TestResult');
+                result.textContent = 'Asking…';
+
+                /*
+                 * Sends a fraction of a second of silence, which every backend accepts
+                 * and none charges meaningfully for. It answers the question this page
+                 * otherwise cannot: without it, "the key is wrong", "the local server
+                 * is not running" and "this library has nothing to check" all look
+                 * identical from here.
+                 */
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('Cicerone/TestProfile'),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    if (!payload.Ok) {
+                        result.textContent = 'No: ' + payload.Message;
+                        return;
+                    }
+
+                    result.textContent = 'Answered, on ' + payload.Model + '.'
+                        + (payload.Timestamped
+                            ? ''
+                            : ' Note: it returned no timings for that clip — if that holds for real audio, '
+                              + 'sync can only be measured to a few seconds. Use a Whisper-family model with '
+                              + 'verbose_json support.');
+                }, function () {
+                    result.textContent = 'The request failed. Check the server log.';
+                });
+            }
+
+            function estimate() {
+                var result = page.querySelector('#EstimateResult');
+                result.textContent = 'Working it out…';
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Estimate'),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    var line = payload.Items + ' item' + (payload.Items === 1 ? '' : 's') + ' — '
+                        + payload.AudioMinutes.toFixed(0) + ' minutes of audio';
+
+                    line += payload.CostUsd === null || payload.CostUsd === undefined
+                        ? '. No price is set on the profile, so there is no cost to quote.'
+                        : ', about $' + Number(payload.CostUsd).toFixed(2) + '.';
+
+                    if (payload.Budgeted) {
+                        line += ' That is over the audio budget, so a run would stop early.';
+                    }
+
+                    result.textContent = line;
+                }, function () {
+                    result.textContent = 'Could not work it out. Check the server log.';
+                });
+            }
+
+            /* ----------------------------------------------------------------- runs */
+
+            var statusTimer = null;
+            var generation = 0;
+
+            function pollStatus(mine) {
+                if (mine !== generation) {
+                    return;
+                }
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Status'),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    if (mine !== generation) {
+                        return;
+                    }
+
+                    var panel = page.querySelector('#RunProgress');
+
+                    if (!payload.Running || !payload.Run) {
+                        panel.classList.add('cicHide');
+                        refreshRuns();
+                        return;
+                    }
+
+                    var run = payload.Run;
+                    var done = run.Done || 0;
+                    var planned = run.Planned || 0;
+                    var percent = planned > 0 ? Math.min(100, (done * 100) / planned) : 0;
+
+                    panel.classList.remove('cicHide');
+                    page.querySelector('#ProgressFill').style.width = percent.toFixed(1) + '%';
+                    page.querySelector('#ProgressLabel').textContent =
+                        done + ' of ' + planned + ' items';
+
+                    var right = percent.toFixed(0) + '%';
+
+                    if (run.AudioMinutes) {
+                        right += ' · ' + run.AudioMinutes.toFixed(1) + ' min audio';
+                    }
+
+                    if (run.CostUsd !== null && run.CostUsd !== undefined) {
+                        right += ' · $' + Number(run.CostUsd).toFixed(2);
+                    }
+
+                    if (run.TimeLeft) {
+                        // A TimeSpan arrives as "hh:mm:ss(.fffffff)". Parsed rather
+                        // than printed raw, because "00:41:12.7340000" is not a thing
+                        // to show a person.
+                        var parts = String(run.TimeLeft).split(':');
+                        if (parts.length === 3) {
+                            right += ' · '
+                                + duration((+parts[0] * 3600) + (+parts[1] * 60) + parseFloat(parts[2]))
+                                + ' left';
+                        }
+                    }
+
+                    page.querySelector('#ProgressRight').textContent = right;
+                    page.querySelector('#ProgressItem').textContent = run.CurrentItem || '';
+
+                    statusTimer = setTimeout(function () { pollStatus(mine); }, 2000);
+                }, function () {
+                    if (mine === generation) {
+                        statusTimer = setTimeout(function () { pollStatus(mine); }, 5000);
+                    }
+                });
+            }
+
+            function startPolling() {
+                generation++;
+                if (statusTimer) {
+                    clearTimeout(statusTimer);
+                    statusTimer = null;
+                }
+
+                pollStatus(generation);
+            }
+
+            function startRun() {
+                var result = page.querySelector('#RunResult');
+                result.textContent = 'Starting…';
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('Cicerone/Verify')
+                }).then(function () {
+                    result.textContent = 'Started. It keeps going if you leave this page.';
+                    startPolling();
+                }, function () {
+                    result.textContent = 'Could not start — a run may already be going.';
+                });
+            }
+
+            function checkOne() {
+                var id = page.querySelector('#OneItemId').value.trim();
+                var result = page.querySelector('#OneItemResult');
+
+                if (!id) {
+                    result.textContent = 'Paste an item ID first.';
+                    return;
+                }
+
+                result.textContent = 'Listening…';
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('Cicerone/Verify/' + encodeURIComponent(id)),
+                    dataType: 'json'
+                }).then(function (report) {
+                    if (report.Error) {
+                        result.textContent = report.Name + ': ' + report.Error;
+                        return;
+                    }
+
+                    if (!report.Tracks || report.Tracks.length === 0) {
+                        result.textContent = report.Name + ': no subtitle tracks in the languages you asked for.';
+                        return;
+                    }
+
+                    var lines = report.Tracks.map(function (track) {
+                        var why = (track.Sync && track.Sync.Reason) || track.Skipped || '';
+                        return '#' + track.Track.Index + ' ' + (track.Track.Language || 'untagged')
+                            + ' — ' + (VERDICT_LABELS[track.Verdict] || track.Verdict)
+                            + (why ? ': ' + why : '');
+                    });
+
+                    result.textContent = report.Name + ' — ' + lines.join(' | ');
+                    refreshReport();
+                }, function () {
+                    result.textContent = 'Failed. Check the item ID and the server log.';
+                });
+            }
+
+            function refreshRuns() {
+                return ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Runs?limit=5'),
+                    dataType: 'json'
+                }).then(function (runs) {
+                    var target = page.querySelector('#RecentRuns');
+                    target.innerHTML = '';
+
+                    if (!runs || runs.length === 0) {
+                        target.textContent = 'Nothing yet.';
+                        return;
+                    }
+
+                    runs.forEach(function (run) {
+                        var line = document.createElement('div');
+                        var started = new Date(run.StartedUtc).toLocaleString();
+                        var items = (run.Items || []).length;
+
+                        var summary = started + ' · ' + run.Trigger + ' · ' + run.Status
+                            + ' · ' + items + ' item' + (items === 1 ? '' : 's');
+
+                        if (run.TotalCostUsd !== null && run.TotalCostUsd !== undefined) {
+                            summary += ' · $' + Number(run.TotalCostUsd).toFixed(2);
+                        }
+
+                        if (run.Error) {
+                            summary += ' — ' + run.Error;
+                        }
+
+                        line.textContent = summary;
+                        line.style.padding = '0.2em 0';
+                        target.appendChild(line);
+                    });
+                }, function () { });
+            }
+
+            /* --------------------------------------------------------------- report */
+
+            function refreshReport() {
+                var filter = page.querySelector('#VerdictFilter').value;
+                var url = 'Cicerone/Reports?limit=500' + (filter ? '&verdict=' + encodeURIComponent(filter) : '');
+
+                return ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl(url),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    renderCoverage(payload.Coverage, payload.Languages || []);
+                    renderRows(payload.Items || [], payload.Languages || []);
+                }, function () {
+                    page.querySelector('#ReportEmpty').textContent = 'Could not read the reports.';
+                });
+            }
+
+            function renderCoverage(coverage, languages) {
+                var tally = page.querySelector('#CoverageTally');
+                tally.innerHTML = '';
+
+                if (!coverage || !coverage.Items) {
+                    page.querySelector('#CoverageNote').textContent = '';
+                    return;
+                }
+
+                VERDICTS.forEach(function (verdict) {
+                    var count = (coverage.ByVerdict && coverage.ByVerdict[verdict]) || 0;
+                    if (!count) {
+                        return;
+                    }
+
+                    var item = document.createElement('span');
+                    item.className = 'cicTallyItem';
+
+                    var value = document.createElement('span');
+                    value.className = 'cicTallyCount';
+                    value.textContent = count;
+
+                    item.appendChild(value);
+                    item.appendChild(document.createTextNode(' '));
+                    item.appendChild(pill(verdict));
+                    tally.appendChild(item);
+                });
+
+                var missing = coverage.MissingByLanguage || {};
+                Object.keys(missing).forEach(function (language) {
+                    var item = document.createElement('span');
+                    item.className = 'cicTallyItem';
+
+                    var value = document.createElement('span');
+                    value.className = 'cicTallyCount';
+                    value.textContent = missing[language];
+
+                    var label = document.createElement('span');
+                    label.className = 'cicPill cicMissing';
+                    label.textContent = 'no ' + language + ' track';
+
+                    item.appendChild(value);
+                    item.appendChild(document.createTextNode(' '));
+                    item.appendChild(label);
+                    tally.appendChild(item);
+                });
+
+                page.querySelector('#CoverageNote').textContent =
+                    coverage.Items + ' item' + (coverage.Items === 1 ? '' : 's') + ' checked, '
+                    + coverage.AudioMinutes.toFixed(0) + ' minutes of audio transcribed in total. '
+                    + 'Counted on the best track per language'
+                    + (languages.length ? ' (' + languages.join(', ') + ').' : '.');
+            }
+
+            function renderRows(items, languages) {
+                var body = page.querySelector('#ReportRows');
+                body.innerHTML = '';
+
+                page.querySelector('#ReportEmpty').textContent = items.length === 0
+                    ? 'Nothing to show.'
+                    : '';
+
+                items.forEach(function (item) {
+                    // One row per track rather than per item. An item's interest is
+                    // usually one bad track among several good ones, and folding that
+                    // into a single line loses exactly the thing being looked for.
+                    (item.Tracks || []).forEach(function (track) {
+                        var row = document.createElement('tr');
+
+                        cell(row, item.SeriesName ? item.SeriesName + ' — ' + item.Name : item.Name);
+                        cell(row, '#' + track.Track.Index + ' ' + (track.Track.Language || 'untagged')
+                            + (track.Track.IsExternal ? ' · external' : '')
+                            + (track.Track.IsHearingImpaired ? ' · SDH' : ''));
+
+                        var verdictCell = document.createElement('td');
+                        verdictCell.appendChild(pill(track.Verdict));
+                        row.appendChild(verdictCell);
+
+                        cell(row, track.Sync ? seconds(track.Sync.WorstErrorSeconds) : '—',
+                            'cicRight cicMono');
+
+                        cell(row, (track.Sync && track.Sync.Reason) || track.Skipped || '', 'cicNote');
+
+                        body.appendChild(row);
+                    });
+                });
+            }
+
+            function clearReports() {
+                ApiClient.ajax({
+                    type: 'DELETE',
+                    url: ApiClient.getUrl('Cicerone/Reports'),
+                    dataType: 'json'
+                }).then(function () {
+                    refreshReport();
+                }, function () { });
+            }
+
+            /* ----------------------------------------------------------------- wire */
+
+            page.addEventListener('pageshow', function () {
+                load();
+                showVersion();
+                refreshRuns();
+                refreshReport();
+                startPolling();
+            });
+
+            page.addEventListener('pagehide', function () {
+                // Stops the two-second poll dead when the page goes away. Without this
+                // every visit leaves another timer behind, and a dashboard left open
+                // all day ends up asking a dozen times a second.
+                generation++;
+                if (statusTimer) {
+                    clearTimeout(statusTimer);
+                    statusTimer = null;
+                }
+            });
+
+            page.querySelector('#CiceroneConfigForm').addEventListener('submit', function (event) {
+                event.preventDefault();
+                save();
+                return false;
+            });
+
+            var tabs = page.querySelectorAll('.cicTab');
+            for (var i = 0; i < tabs.length; i++) {
+                tabs[i].addEventListener('click', function (event) {
+                    switchTab(event.currentTarget.getAttribute('data-panel'));
+                });
+            }
+
+            page.querySelector('#AddProfile').addEventListener('click', function () {
+                var profile = {
+                    Id: newId(),
+                    Name: 'New profile',
+                    Provider: 'OpenAi',
+                    Model: 'whisper-1',
+                    ApiKey: '',
+                    BaseUrl: '',
+                    CostPerAudioMinute: 0,
+                    HintLanguage: true,
+                    TimeoutSeconds: 180
+                };
+
+                profiles.push(profile);
+
+                if (!defaultProfileId) {
+                    defaultProfileId = profile.Id;
+                }
+
+                renderProfiles();
+            });
+
+            page.querySelector('#TestProfile').addEventListener('click', testProfile);
+            page.querySelector('#EstimateRun').addEventListener('click', estimate);
+            page.querySelector('#StartRun').addEventListener('click', startRun);
+            page.querySelector('#CheckOne').addEventListener('click', checkOne);
+            page.querySelector('#RefreshReport').addEventListener('click', refreshReport);
+            page.querySelector('#VerdictFilter').addEventListener('change', refreshReport);
+            page.querySelector('#ClearReports').addEventListener('click', clearReports);
+        })();
+    </script>
+</div>
+</body>
+</html>

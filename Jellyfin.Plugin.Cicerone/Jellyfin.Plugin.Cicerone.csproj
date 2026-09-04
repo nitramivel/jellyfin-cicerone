@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.Cicerone</RootNamespace>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">$(Version).0</AssemblyVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The whole of Core is written to be exercised without ffmpeg, without a
+         transcription endpoint and without a Jellyfin server, because this machine
+         has none of the three. That only pays off if the tests can see it. -->
+    <InternalsVisibleTo Include="Jellyfin.Plugin.Cicerone.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration\configPage.html" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pinned to the ABI the owner's server actually runs, matching Curator,
+         Concierge and Colorist. Note what is NOT here: no audio library and no
+         speech runtime. ffmpeg — which the server already ships and configures —
+         cuts the clips, and the recognition happens at the other end of an HTTP
+         call, so there is nothing left for a native dependency to do. -->
+    <PackageReference Include="Jellyfin.Controller" Version="10.11.11" />
+    <PackageReference Include="Jellyfin.Model" Version="10.11.11" />
+  </ItemGroup>
+
+</Project>

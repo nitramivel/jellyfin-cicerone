@@ -1,0 +1,12 @@
+[
+  {
+    "guid": "83004bd9-e2d6-4e13-9f3a-73bb12ef1f96",
+    "name": "Cicerone",
+    "description": "Checks subtitle tracks against the dialogue in the file — the right language, the right cut, and timed to the audio rather than merely present.",
+    "overview": "Subtitles that actually match the dialogue.",
+    "owner": "nitramivel",
+    "category": "General",
+    "imageUrl": "",
+    "versions": []
+  }
+]
