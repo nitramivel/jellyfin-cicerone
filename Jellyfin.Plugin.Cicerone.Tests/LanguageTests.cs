@@ -65,7 +65,8 @@ namespace Jellyfin.Plugin.Cicerone.Tests
         private const string German =
             "Ich weiß nicht, was du von mir willst, aber ich werde dich nicht gehen lassen. "
             + "Das ist nicht dein Auto und der Schlüssel ist nicht dein Schlüssel. "
-            + "Wir müssen jetzt gehen, mit oder ohne die anderen, und zwar sofort.";
+            + "Wir müssen jetzt gehen, mit oder ohne die anderen, und zwar sofort. "
+            + "Ich habe so etwas noch nie gesehen, aber ich kann dir nicht sagen, was jetzt passiert.";
 
         [Fact]
         public void ReadsEnglish()

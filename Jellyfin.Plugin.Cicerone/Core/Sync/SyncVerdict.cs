@@ -124,8 +124,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
                     single,
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"only one window matched, so the offset is {Format(correction.OffsetSeconds)} "
-                        + "and drift could not be measured at all"));
+                        $"only one window matched, so the offset is {Format(correction.OffsetSeconds)} and drift could not be measured at all"));
             }
 
             if (correction.ResidualSeconds > maxResidualSeconds)
@@ -137,8 +136,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
                     Math.Abs(correction.OffsetSeconds),
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"the windows disagree by {correction.ResidualSeconds:0.0}s about how far out the "
-                        + "track is, which no single shift can explain — most likely a different cut"));
+                        $"the windows disagree by {correction.ResidualSeconds:0.0}s about how far out the track is, which no single shift can explain — most likely a different cut"));
             }
 
             var atStart = correction.ErrorAt(TimeSpan.Zero);
@@ -155,8 +153,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
                     worst,
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"within {Format(worst)} of the dialogue across "
-                        + Plural(confident, "window", "windows")));
+                        $"within {Format(worst)} of the dialogue across {Plural(confident, "window", "windows")}"));
             }
 
             if (spread > toleranceSeconds)

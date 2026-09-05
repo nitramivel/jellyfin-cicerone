@@ -220,5 +220,19 @@ namespace Jellyfin.Plugin.Cicerone.Configuration
         /// </remarks>
         public double AudioSecondsPerItem(int trackCount) =>
             Math.Max(trackCount, 0) * Math.Max(AnchorCount, 0) * Math.Max(AnchorWindowSeconds, 0);
+
+        /// <summary>How many items a run may have in the air at once.</summary>
+        /// <returns>A lane count of at least one.</returns>
+        /// <remarks>
+        /// Resolves the 0 in <see cref="MaxConcurrency"/>. An item is a little ffmpeg
+        /// and a lot of waiting for somebody else's HTTP endpoint, so lanes are worth
+        /// having — but the endpoint's rate limit is usually the real ceiling rather
+        /// than the machine, and it is not a number this can read. The worked-out
+        /// figure is therefore deliberately modest and capped well below the core
+        /// count; an owner who knows their transcriber tolerates more says so.
+        /// </remarks>
+        public int Lanes() => MaxConcurrency > 0
+            ? Math.Min(MaxConcurrency, 16)
+            : Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
     }
 }

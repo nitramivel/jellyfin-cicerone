@@ -55,7 +55,7 @@ entry = {
 
 manifest_path = "manifest.json"
 if os.path.exists(manifest_path):
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 else:
     manifest = [
@@ -75,8 +75,10 @@ versions = [v for v in manifest[0]["versions"] if v["version"] != version]
 versions.insert(0, entry)
 manifest[0]["versions"] = versions
 
-with open(manifest_path, "w") as f:
-    json.dump(manifest, f, indent=2)
+with open(manifest_path, "w", encoding="utf-8") as f:
+    # ensure_ascii off: the description has an em dash in it, and escaping it to
+    # \u2014 on every release makes a diff out of a line nobody edited.
+    json.dump(manifest, f, indent=2, ensure_ascii=False)
     f.write("\n")
 
 print(f"Zip:      {zip_path}")

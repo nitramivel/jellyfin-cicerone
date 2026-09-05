@@ -17,15 +17,17 @@ get subtitles".
 
 ---
 
-## Status: COMPLETE BUT NEVER COMPILED
+## Status: BUILDS CLEAN, NEVER INSTALLED
 
-Every file the plugin needs now exists, including the embedded config page. What has
-**not** happened is a build: there is no .NET SDK, no ffmpeg and no Jellyfin on the
-machine this was written on. Nothing here has been run.
+Compiles against `Jellyfin.Controller` 10.11.11 on .NET 9 with warnings as errors, and
+158 tests pass. Every Jellyfin API call that was written from the sibling plugins'
+patterns and never checked resolved against the real assembly on the first build —
+those were the expected failures and none of them happened.
 
-The first job anywhere else is `dotnet build`, and the likeliest failures are the
-Jellyfin API calls listed under *What is left* — written from the patterns in the
-sibling plugins and never checked against the real assembly.
+What has **not** happened is a run against a server. There is no ffmpeg and no
+Jellyfin on this machine, so nothing here has cut a clip, called a transcriber or
+written a repaired sidecar. The measurement is tested; the plumbing around it is
+compiled and unexercised.
 
 ---
 
@@ -68,7 +70,8 @@ Core/          pure, no I/O, no Jellyfin types — all of it unit tested
   Language/    script and function-word identification, ISO code normalisation
   Audio/       ffmpeg argument construction, audio track choice
   Reports/     the stored per-item report shape and the library-wide tally
-  Runs/        run log document shape, and RunEstimate (throughput → time left)
+  Runs/        run log document shape, RunEstimate (throughput → time left) and
+               RunBudget (the audio ceiling, shared across lanes)
 Services/      everything that touches a process, a file, an API or Jellyfin
   FfmpegRunner            process handling, below-normal priority
   AudioSampler            drives ffmpeg, cuts the clips
@@ -205,19 +208,47 @@ never persisted. A run whose file still says `running` with no process behind it
 reported as **abandoned**, worked out when the file is read — the one thing a dead
 process cannot do is write that it died.
 
+**A lane holds what it is about to spend.** `RunBudget` reserves the per-item estimate
+before a lane starts and settles the real figure when the report comes back, because a
+ceiling tested against what has been *spent* is no ceiling once items run several at a
+time: every lane reads the same figure, every lane concludes there is room, and the run
+finishes a full round past the line. The test is whether the ceiling has been reached
+rather than whether the next item fits under it, so a budget smaller than one item
+stops a run after one item instead of refusing to start it — the setting stops a run
+early, it does not veto one. `LanesHoldWhatTheyAreAboutToSpend` is the demonstration.
+
+**`RunLogStore` tracks the items in flight, not the last one started.** With lanes, a
+single `CurrentItem` field is whatever lane started most recently — which is often an
+item that finished minutes ago while three others are still being listened to. The
+progress panel gets all of them, joined. `Working` and `Left` are paired in a
+`finally`; nothing about it is persisted, as before.
+
+**The worked-out lane count is deliberately modest.** `MaxConcurrency` of 0 resolves to
+half the cores, capped at four, because an item is a little ffmpeg and a lot of waiting
+on somebody else's HTTP endpoint — and that endpoint's rate limit, which nothing here
+can read, is usually the real ceiling. Lanes change the *rate* of spending and never
+the total; the budget is what bounds the bill.
+
 ---
 
 ## What is left
 
-### 1. Build it
-
-Nothing has been compiled. Run the tests first — they need no network, no ffmpeg and
-no server, and they cover every decision the plugin actually makes.
+### 1. Build it — done
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"
-dotnet test Jellyfin.Plugin.Cicerone.sln -c Release
+dotnet test Jellyfin.Plugin.Cicerone.sln -c Release   # 158 passed
 ```
+
+Three compile errors and one test failure, all fixed:
+
+- `SyncVerdict` passed `$"…" + "…"` to `string.Create(IFormatProvider, …)`. A
+  concatenation is a `string`, not an interpolated string handler, so the overload
+  does not bind. The three reasons are single interpolated strings now.
+- The German sample in `LanguageTests` was 39 words against
+  `LanguageProfile.MinimumWords` of 40, so `Identify` correctly returned nothing. The
+  sample was extended; the threshold is a decision, not a knob to turn when a test
+  built too close to it fails.
 
 ### 2. Verify against a live server
 
@@ -241,30 +272,31 @@ For the avoidance of re-doing it:
 - Six test files: `SubtitleTests`, `SyncTests`, `AnchorAndVerdictTests`,
   `LanguageTests`, `AudioPlanTests`, `StoreAndProviderTests`.
 - `build/package.sh`, `build/release.sh`, `manifest.json`, `LICENSE`, `.gitignore`,
-  the solution and both project files.
+  the solution and both project files. Both scripts have been run: the zip has the
+  plugin files at its root, the meta.json is right and the manifest entry lands with
+  its MD5. Note that the checksum changes on every build — `meta.json` carries a
+  timestamp — which is why the uploaded zip has to be the one that was measured.
+- Concurrency: `MaxConcurrency` is wired (see below), with `RunBudget` in `Core` and
+  its tests.
 
-### 4. Unverified Jellyfin API calls
+### 4. Jellyfin API calls — all compile
 
-Written from the patterns in Concierge, Curator and Colorist but never compiled
-against `Jellyfin.Controller` 10.11.11. Check these first when the build errors:
+Every one of them resolved against `Jellyfin.Controller` 10.11.11 on the first build:
+`IMediaSourceManager.GetMediaStreams(Guid)`, the 8-argument
+`ISubtitleEncoder.GetSubtitles`, `ILibraryManager.QueueLibraryScan()`,
+`InternalItemsQuery.HasSubtitles`, `MediaStream.IsHearingImpaired` / `.IsForced` /
+`.IsTextSubtitleStream`, `IMediaEncoder.EncoderPath`, `Policies.RequiresElevation`.
 
-- `IMediaSourceManager.GetMediaStreams(Guid)` — `CheckService`
-- `ISubtitleEncoder.GetSubtitles(item, id, index, "srt", 0, 0, false, ct)` — the
-  8-argument form, copied from Concierge's `SubtitleIndexer.cs:462`
-- `ILibraryManager.QueueLibraryScan()` — `RepairWriter.Refresh`; it ignores the item
-  argument, which is a smell worth revisiting
-- `InternalItemsQuery.HasSubtitles` — `VerifyRunService.Eligible`
-- `MediaStream.IsHearingImpaired` / `.IsForced` / `.IsTextSubtitleStream`
-- `IMediaEncoder.EncoderPath` — `AudioSampler`
-- `Policies.RequiresElevation` — `CiceroneController`
+Compiling is not behaving. What each of them *does* is still unverified, and
+`RepairWriter.Refresh` calling `QueueLibraryScan()` while ignoring the item argument
+remains the smell it always was — a full library scan to pick up one new sidecar.
 
 ### 5. Git and GitHub
 
-Not initialised. Nothing pushed. `gh` is authenticated as `nitramivel` with `repo`
-scope.
+Initialised and committed locally. **No remote, nothing pushed.** `gh` is
+authenticated as `nitramivel` with `repo` scope.
 
 ```bash
-git init && git add -A && git commit
 gh repo create jellyfin-cicerone --public --source=. --push
 ```
 
@@ -275,9 +307,9 @@ call — do not create the repository without asking.
 
 - No health check task (Curator has one; this has no equivalent yet).
 - No per-item detail view in the settings page beyond the coverage table.
-- `MaxConcurrency` is read from configuration but `VerifyRunService` still walks items
-  sequentially. Either wire it up or delete the setting; a setting that does nothing
-  is worse than neither.
+- The transcript providers are unexercised: no HTTP call has ever been made. The
+  response parsing is tested against captured shapes, the sending of the request is
+  not.
 
 ---
 

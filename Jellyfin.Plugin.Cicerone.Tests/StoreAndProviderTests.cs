@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.Cicerone.Core.Reports;
 using Jellyfin.Plugin.Cicerone.Core.Runs;
 using Jellyfin.Plugin.Cicerone.Core.Subtitles;
@@ -348,6 +350,108 @@ namespace Jellyfin.Plugin.Cicerone.Tests
 
             Assert.NotNull(left);
             Assert.True(left!.Value.TotalSeconds < 200, $"estimate was {left.Value.TotalSeconds}s");
+        }
+    }
+
+    public class RunBudgetTests
+    {
+        // Two and a half minutes, which is what five thirty-second anchors cost.
+        private const double Item = 150;
+
+        [Fact]
+        public void NoCeilingAdmitsEverything()
+        {
+            var budget = new RunBudget(0);
+
+            for (var i = 0; i < 1000; i++)
+            {
+                Assert.True(budget.TryReserve(Item));
+                budget.Settle(Item, Item);
+            }
+
+            Assert.False(budget.Exhausted);
+        }
+
+        [Fact]
+        public void StopsTheRunOnceTheCeilingIsReached()
+        {
+            var budget = new RunBudget(Item * 3);
+
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.True(budget.TryReserve(Item));
+                budget.Settle(Item, Item);
+            }
+
+            Assert.False(budget.TryReserve(Item));
+            Assert.True(budget.Exhausted);
+            Assert.Equal(Item * 3, budget.SpentSeconds, 3);
+        }
+
+        [Fact]
+        public void ABudgetSmallerThanOneItemStopsAfterOneRatherThanRefusingToStart()
+        {
+            // The setting stops a run early; it does not veto one. A ceiling below the
+            // cost of a single item that admitted nothing would report a completed run
+            // over an unchecked library, which reads as "there was nothing to do".
+            var budget = new RunBudget(10);
+
+            Assert.True(budget.TryReserve(Item));
+            budget.Settle(Item, Item);
+            Assert.False(budget.TryReserve(Item));
+        }
+
+        [Fact]
+        public void LanesHoldWhatTheyAreAboutToSpend()
+        {
+            // The whole reason the reservation exists. Three lanes take their places
+            // under a three-item ceiling before any of them has spent a thing; tested
+            // against what has been spent, all three would see an empty budget, and so
+            // would the next three.
+            var budget = new RunBudget(Item * 3);
+
+            Assert.True(budget.TryReserve(Item));
+            Assert.True(budget.TryReserve(Item));
+            Assert.True(budget.TryReserve(Item));
+            Assert.False(budget.TryReserve(Item));
+        }
+
+        [Fact]
+        public void AnItemThatCostNothingReleasesItsPlace()
+        {
+            // An item skipped for having no dialogue, or one that failed before any
+            // audio was cut, must not consume a share of the ceiling it never spent.
+            var budget = new RunBudget(Item * 2);
+
+            Assert.True(budget.TryReserve(Item));
+            budget.Settle(Item, 0);
+            Assert.True(budget.TryReserve(Item));
+            budget.Settle(Item, 0);
+
+            Assert.True(budget.TryReserve(Item));
+            Assert.Equal(0, budget.SpentSeconds, 3);
+        }
+
+        [Fact]
+        public void TheLedgerSurvivesLanesRunningAtOnce()
+        {
+            var budget = new RunBudget(Item * 50);
+            var admitted = 0;
+
+            Parallel.For(0, 500, _ =>
+            {
+                if (budget.TryReserve(Item))
+                {
+                    Interlocked.Increment(ref admitted);
+                    budget.Settle(Item, Item);
+                }
+            });
+
+            // At most one item per lane may be admitted on the line itself, and there
+            // is no lane count here to bound it by — but the arithmetic must still add
+            // up exactly, and nothing may be admitted long past the ceiling.
+            Assert.InRange(admitted, 50, 50 + Environment.ProcessorCount);
+            Assert.Equal(admitted * Item, budget.SpentSeconds, 3);
         }
     }
 }

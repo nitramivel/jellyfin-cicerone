@@ -81,73 +81,94 @@ namespace Jellyfin.Plugin.Cicerone.Services
                 var items = Eligible(config);
                 var due = items.Where(i => config.RecheckExisting || Due(i)).ToList();
 
-                _runs.Begin(trigger, due.Count);
-                _logger.LogInformation(
-                    "Cicerone: checking {Due} of {Total} items ({Minutes:0} minutes of audio at most)",
-                    due.Count,
-                    items.Count,
-                    due.Count * config.AudioSecondsPerItem(1) / 60);
+                var lanes = config.Lanes();
 
-                var budgetSeconds = config.AudioMinuteBudget > 0 ? config.AudioMinuteBudget * 60.0 : double.MaxValue;
-                var spentSeconds = 0.0;
+                // The estimate a lane holds while it works. One track's worth, which
+                // is what the run is quoted at below; the real figure replaces it the
+                // moment the report comes back.
+                var estimate = config.AudioSecondsPerItem(1);
+                var budget = new RunBudget(config.AudioMinuteBudget * 60.0);
                 var done = 0;
 
-                foreach (var item in due)
+                _runs.Begin(trigger, due.Count);
+                _logger.LogInformation(
+                    "Cicerone: checking {Due} of {Total} items, {Lanes} at a time "
+                    + "({Minutes:0} minutes of audio at most)",
+                    due.Count,
+                    items.Count,
+                    lanes,
+                    due.Count * estimate / 60);
+
+                await Parallel.ForEachAsync(
+                    due,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = lanes,
+                        CancellationToken = cancellationToken,
+                    },
+                    async (item, ct) =>
+                    {
+                        if (!budget.TryReserve(estimate))
+                        {
+                            // Returned rather than thrown, so the lanes still working
+                            // finish the items they are holding. What remains costs a
+                            // predicate each and no audio at all.
+                            return;
+                        }
+
+                        _runs.Working(item.Name);
+
+                        var stopwatch = Stopwatch.StartNew();
+                        ItemReport report;
+
+                        try
+                        {
+                            report = await _checks.CheckAsync(item, config, ct).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            // One item's failure is one item. A run over a library will
+                            // meet an unreadable file, a provider outage and a container
+                            // ffmpeg refuses, and stopping on any of them would mean a
+                            // library is only ever checked as far as its first bad file.
+                            _logger.LogWarning(ex, "Cicerone: failed to check {Item}", item.Name);
+                            report = new ItemReport(
+                                item.Id, item.Name ?? string.Empty, item is MediaBrowser.Controller.Entities.TV.Episode
+                                    ? "Episode" : "Movie",
+                                null, DateTime.UtcNow, string.Empty, 0, [], config.Languages(), 0, null, ex.Message);
+                        }
+                        finally
+                        {
+                            _runs.Left(item.Name);
+                        }
+
+                        stopwatch.Stop();
+                        budget.Settle(estimate, report.AudioSeconds);
+
+                        await _reports.SaveAsync(report, ct).ConfigureAwait(false);
+                        _runs.Finished(Record(report, config, stopwatch.ElapsedMilliseconds));
+
+                        // due.Count cannot be zero here: an empty list runs no body.
+                        var finished = Interlocked.Increment(ref done);
+                        progress?.Report(finished * 100.0 / due.Count);
+                    }).ConfigureAwait(false);
+
+                if (budget.Exhausted)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    if (spentSeconds >= budgetSeconds)
-                    {
-                        // Stopped rather than skipped-and-continued, because every
-                        // remaining item would hit the same ceiling and the run would
-                        // spend an hour walking a library it cannot check.
-                        _logger.LogInformation(
-                            "Cicerone: the run reached its {Budget}-minute audio budget and stopped early",
-                            config.AudioMinuteBudget);
-                        break;
-                    }
-
-                    _runs.Working(item.Name);
-
-                    var stopwatch = Stopwatch.StartNew();
-                    ItemReport report;
-
-                    try
-                    {
-                        report = await _checks.CheckAsync(item, config, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // One item's failure is one item. A run over a library will
-                        // meet an unreadable file, a provider outage and a container
-                        // ffmpeg refuses, and stopping on any of them would mean a
-                        // library is only ever checked as far as its first bad file.
-                        _logger.LogWarning(ex, "Cicerone: failed to check {Item}", item.Name);
-                        report = new ItemReport(
-                            item.Id, item.Name ?? string.Empty, item is MediaBrowser.Controller.Entities.TV.Episode
-                                ? "Episode" : "Movie",
-                            null, DateTime.UtcNow, string.Empty, 0, [], config.Languages(), 0, null, ex.Message);
-                    }
-
-                    stopwatch.Stop();
-                    spentSeconds += report.AudioSeconds;
-
-                    await _reports.SaveAsync(report, cancellationToken).ConfigureAwait(false);
-                    _runs.Finished(Record(report, config, stopwatch.ElapsedMilliseconds));
-
-                    done++;
-                    progress?.Report(due.Count == 0 ? 100 : done * 100.0 / due.Count);
+                    _logger.LogInformation(
+                        "Cicerone: the run reached its {Budget}-minute audio budget and stopped early",
+                        config.AudioMinuteBudget);
                 }
 
                 _runs.End(RunStatus.Completed);
                 _logger.LogInformation(
                     "Cicerone: run finished — {Done} items, {Minutes:0.0} minutes of audio",
                     done,
-                    spentSeconds / 60);
+                    budget.SpentSeconds / 60);
             }
             catch (OperationCanceledException)
             {

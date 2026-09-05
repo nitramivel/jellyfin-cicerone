@@ -66,7 +66,7 @@ namespace Jellyfin.Plugin.Cicerone.Services.Runs
         private RunLogDocument? _current;
         private List<RunItem> _items = [];
         private List<DateTime> _completions = [];
-        private string? _currentItem;
+        private List<string> _working = [];
         private DateTime _lastWrite = DateTime.MinValue;
 
         /// <summary>Initialises a new instance of the <see cref="RunLogStore"/> class.</summary>
@@ -102,7 +102,7 @@ namespace Jellyfin.Plugin.Cicerone.Services.Runs
                 var id = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
                 _items = [];
                 _completions = [];
-                _currentItem = null;
+                _working = [];
                 _lastWrite = DateTime.MinValue;
                 _current = new RunLogDocument(
                     id, DateTime.UtcNow, null, RunStatus.Running, trigger, planned, _items, null, null);
@@ -112,15 +112,31 @@ namespace Jellyfin.Plugin.Cicerone.Services.Runs
             }
         }
 
-        /// <summary>Says what the run is working on.</summary>
+        /// <summary>Says the run has started on an item.</summary>
         /// <param name="name">The item's name.</param>
+        /// <remarks>
+        /// A list rather than a single name because a run walks several lanes at
+        /// once, and a field the last lane to start overwrites would show an item
+        /// that finished minutes ago while three others are still being listened to.
+        /// Every call must be paired with <see cref="Left"/>.
+        /// </remarks>
         public void Working(string? name)
         {
             lock (_gate)
             {
                 // Never persisted. It changes several times a minute and exists only
                 // for the progress panel, which reads it from memory.
-                _currentItem = name;
+                _working.Add(name ?? string.Empty);
+            }
+        }
+
+        /// <summary>Says the run has left an item, however it went.</summary>
+        /// <param name="name">The item's name, as it was passed to <see cref="Working"/>.</param>
+        public void Left(string? name)
+        {
+            lock (_gate)
+            {
+                _working.Remove(name ?? string.Empty);
             }
         }
 
@@ -168,7 +184,7 @@ namespace Jellyfin.Plugin.Cicerone.Services.Runs
                 Persist();
                 Rotate();
                 _current = null;
-                _currentItem = null;
+                _working = [];
             }
         }
 
@@ -189,7 +205,7 @@ namespace Jellyfin.Plugin.Cicerone.Services.Runs
                     run.Trigger,
                     run.Planned,
                     _items.Count,
-                    _currentItem,
+                    _working.Count == 0 ? null : string.Join(", ", _working),
                     _items.Sum(i => i.AudioSeconds) / 60.0,
                     Total(),
                     RunEstimate.TimeLeft(_completions, run.Planned - _items.Count, DateTime.UtcNow));

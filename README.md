@@ -253,9 +253,11 @@ Version `0.x`, deliberately.
 
 Everything on this page is built, and the parts that can be decided without a server are covered by tests — the SRT parsing, the cleaning, the anchor planning, the offset vote, the drift fit, the frame rate ratios, the verdicts, the retiming, the language identification, the ffmpeg command lines and the provider response parsing are all exercised against synthetic dialogue with a known answer.
 
-**What has not happened is a run against a real server.** The plugin has never been compiled against `Jellyfin.Controller`, because the machine it was written on has no .NET SDK, no ffmpeg and no Jellyfin. Claims here about *accuracy* are designed-for rather than measured; claims about *cost* are arithmetic and exact.
+It compiles clean against `Jellyfin.Controller` 10.11.11 on .NET 9, warnings as errors, and the 158 tests pass.
 
-`CLAUDE.md` lists what is left, including the handful of Jellyfin API calls written from the patterns in the sibling plugins and not yet verified against the real assembly.
+**What has not happened is a run against a real server.** No ffmpeg and no Jellyfin have been anywhere near it: nothing here has cut a clip, called a transcriber or written a repaired sidecar. Claims about *accuracy* are designed-for rather than measured; claims about *cost* are arithmetic and exact.
+
+`CLAUDE.md` lists what is left.
 
 ## ⚠️ Caveats
 
