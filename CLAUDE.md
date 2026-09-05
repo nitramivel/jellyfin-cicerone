@@ -252,7 +252,10 @@ Three compile errors and one test failure, all fixed:
 
 ### 2. Verify against a live server
 
-The plugin has never been installed. In order: package it, drop it in, open the
+**This is the only thing left.** The plugin has never been installed. It can now be
+installed from the catalogue by adding the manifest URL above as a plugin repository,
+which is worth doing in preference to dropping the folder in by hand — it exercises
+the checksum and the ABI at the same time. In order: install it, open the
 settings page, press **Test the default profile** on the Models tab, then
 **Try one item** on the Run tab with a single film. That sequence isolates the three
 things that can be independently wrong — the plugin loading, the transcriber
@@ -291,17 +294,14 @@ Compiling is not behaving. What each of them *does* is still unverified, and
 `RepairWriter.Refresh` calling `QueueLibraryScan()` while ignoring the item argument
 remains the smell it always was — a full library scan to pick up one new sidecar.
 
-### 5. Git and GitHub
+### 5. Git and GitHub — done
 
-Initialised and committed locally. **No remote, nothing pushed.** `gh` is
-authenticated as `nitramivel` with `repo` scope.
-
-```bash
-gh repo create jellyfin-cicerone --public --source=. --push
-```
-
-Public is required for the manifest install URL to resolve, but that is the owner's
-call — do not create the repository without asking.
+Public at <https://github.com/nitramivel/jellyfin-cicerone>, default branch `main`
+(the manifest URL in the README names `main`, so `master` would 404). `v0.1.0.0` is
+tagged and released with `cicerone_0.1.0.0.zip` attached, and the whole install path
+has been walked from outside: the manifest resolves at the documented raw URL, the
+zip downloads from the `sourceUrl` in it, and its MD5 matches the `checksum` — which
+is the one thing Jellyfin checks before it will install.
 
 ### 6. Not built, deliberately or otherwise
 
