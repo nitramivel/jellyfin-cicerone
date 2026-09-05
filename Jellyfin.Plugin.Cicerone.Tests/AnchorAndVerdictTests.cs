@@ -303,3 +303,55 @@ namespace Jellyfin.Plugin.Cicerone.Tests
         }
     }
 }
+
+namespace Jellyfin.Plugin.Cicerone.Tests
+{
+    public class TwoAnchorVerdictTests
+    {
+        private static AnchorPoint At(double seconds, double offset) =>
+            new(TimeSpan.FromSeconds(seconds), TimeSpan.FromSeconds(offset), 1.0);
+
+        [Fact]
+        public void TwoMeasurementsCanSeeASlopeAndCannotCheckOne()
+        {
+            // A line through two points passes through both exactly, so the residual —
+            // the only test that ever asks whether a line was the right model — is zero
+            // by construction and cannot fire. Reporting Drifting from that is
+            // reporting a repairable fault on evidence that cannot be wrong, which is
+            // the same error as trusting one anchor, one step further along.
+            IReadOnlyList<AnchorPoint> two = [At(200, -30), At(1100, 300)];
+            var assessment = SyncVerdictBuilder.Assess(two, DriftFit.Fit(two), TimeSpan.FromSeconds(1300));
+
+            Assert.Equal(Verdict.Unknown, assessment.Verdict);
+            Assert.False(assessment.Repairable);
+        }
+
+        [Fact]
+        public void ThreeMeasurementsAreEnoughToCheckTheLine()
+        {
+            // Three points is where the residual starts meaning something, so a real
+            // drift measured three times is still reported and still repairable.
+            IReadOnlyList<AnchorPoint> three =
+                [At(200, 2.0), At(700, 22.0), At(1200, 42.0)];
+
+            var assessment = SyncVerdictBuilder.Assess(
+                three, DriftFit.Fit(three, snapFrameRates: false), TimeSpan.FromSeconds(1300));
+
+            Assert.Equal(Verdict.Drifting, assessment.Verdict);
+            Assert.True(assessment.Repairable);
+        }
+
+        [Fact]
+        public void ThreeMeasurementsThatDisagreeAreStillAMismatch()
+        {
+            IReadOnlyList<AnchorPoint> scattered =
+                [At(200, -40), At(700, 120), At(1200, -25)];
+
+            var assessment = SyncVerdictBuilder.Assess(
+                scattered, DriftFit.Fit(scattered), TimeSpan.FromSeconds(1300));
+
+            Assert.Equal(Verdict.Mismatched, assessment.Verdict);
+            Assert.False(assessment.Repairable);
+        }
+    }
+}

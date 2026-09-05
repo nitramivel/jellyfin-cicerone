@@ -137,7 +137,8 @@
                    that are one action reads as a form to fill in rather than as a
                    thing to type into and press. */
                 .cicFind { display: flex; gap: 0.6em; align-items: stretch; margin: 0.4em 0 0.2em; }
-                .cicFind input, .cicFind select { flex: 1 1 auto; min-width: 0; }
+                .cicFind input { flex: 1 1 auto; min-width: 0; }
+                .cicFind select { flex: 0 1 16em; min-width: 0; }
                 .cicFind button { flex: 0 0 auto; }
 
                 .cicResults {
@@ -2046,7 +2047,16 @@
 
                 if (armedDelete === source.Id) {
                     element.classList.add('cicArmed');
-                    element.textContent = source.Ours ? 'Really delete?' : 'Delete somebody else’s file?';
+
+                    // Short, because this button sits in a column sized to its
+                    // contents and a sentence here shoves the whole table sideways
+                    // the moment somebody considers deleting something. The warning
+                    // that matters goes in the tooltip and the wording still says
+                    // whose file it is.
+                    element.textContent = source.Ours ? 'Really?' : 'Not ours — really?';
+                    element.title = source.Ours
+                        ? 'Cicerone wrote this file. Deleting it costs a re-run to put back.'
+                        : 'Cicerone did not write this file. Deleting it is permanent.';
                 }
 
                 return element;
@@ -2068,7 +2078,17 @@
                 });
             }
 
-            function loadInventoryQuietly() {
+            /*
+             * Re-reads the listing, and — when an edit produced a file — moves the
+             * editor onto it.
+             *
+             * Editing somebody else's track writes a copy, and without this the editor
+             * would still be pointing at the original: a second shift of two seconds
+             * would then be measured from the original again rather than from the copy
+             * just made, so applying +2 twice would leave the track at +2. Following
+             * the edit onto its result makes the obvious reading the true one.
+             */
+            function loadInventoryQuietly(landedAt) {
                 if (!inventory) { return; }
                 var id = inventory.ItemId;
 
@@ -2079,6 +2099,17 @@
                 }).then(function (payload) {
                     inventory = payload;
                     renderInventory();
+
+                    if (!landedAt || !editing) { return; }
+
+                    var landed = payload.Sources.filter(function (s) {
+                        return s.Path === landedAt;
+                    })[0];
+
+                    if (landed && landed.Id !== editing.Id) {
+                        openEditor(landed);
+                        editorStatus('Now editing the copy that was just written.');
+                    }
                 }, function () { });
             }
 
@@ -2256,7 +2287,7 @@
                         page.querySelector('#EditorOffset').value = '0';
                         page.querySelector('#EditorScale').value = '1';
                         page.querySelector('#EditorText').value = '';
-                        loadInventoryQuietly();
+                        loadInventoryQuietly(outcome.Path);
                     }
                 }, function () {
                     editorStatus('That did not work.');
@@ -2284,7 +2315,7 @@
                 }).then(function (outcome) {
                     editorStatus(outcome.Message);
                     if (outcome.Ok) {
-                        loadInventoryQuietly();
+                        loadInventoryQuietly(outcome.Path);
                     }
                 }, function () {
                     editorStatus('That did not work.');

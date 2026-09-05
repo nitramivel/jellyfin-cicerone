@@ -29,6 +29,8 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
             Bins = bins;
             BinSeconds = binSeconds;
             Active = active;
+            FirstActive = Array.IndexOf(bins, true);
+            LastActive = Array.LastIndexOf(bins, true);
         }
 
         /// <summary>Gets how long one bin is, in seconds.</summary>
@@ -43,6 +45,12 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
         /// <summary>Gets how many bins hold speech.</summary>
         public int Active { get; }
 
+        /// <summary>Gets the first bin holding speech, or -1 when there are none.</summary>
+        public int FirstActive { get; }
+
+        /// <summary>Gets the last bin holding speech, or -1 when there are none.</summary>
+        public int LastActive { get; }
+
         /// <summary>
         /// Gets the share of the signal that is speech.
         /// </summary>
@@ -55,6 +63,32 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
         /// still returns a peak and it is noise.
         /// </remarks>
         public double Coverage => Count == 0 ? 0 : (double)Active / Count;
+
+        /// <summary>
+        /// Gets the share of speech between the first and last thing said.
+        /// </summary>
+        /// <remarks>
+        /// <b>The figure to judge a signal by, because it does not move when the
+        /// signal is padded.</b> Both signals are laid out on a timeline long enough
+        /// to hold either of them however wrong the track is, so a subtitle file that
+        /// is five minutes late has five minutes of dead bins in front of it and the
+        /// audio has dead bins after it. Measured over the whole length, that dead
+        /// space silently dilutes the density of both — and two tracks can then look
+        /// alike for no better reason than being padded to the same length.
+        /// </remarks>
+        public double ContentCoverage
+        {
+            get
+            {
+                if (FirstActive < 0)
+                {
+                    return 0;
+                }
+
+                var span = LastActive - FirstActive + 1;
+                return span <= 0 ? 0 : (double)Active / span;
+            }
+        }
 
         /// <summary>Builds a signal from stretches of speech found in the audio.</summary>
         /// <param name="spans">The stretches.</param>

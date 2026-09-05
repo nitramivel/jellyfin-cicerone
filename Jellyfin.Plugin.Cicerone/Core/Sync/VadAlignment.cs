@@ -85,12 +85,42 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
 
         /// <summary>How well the whole file must match before the windows are worth measuring.</summary>
         /// <remarks>
-        /// Low on purpose. This is not the threshold that decides whether a track is
-        /// good — that is <see cref="SyncVerdictBuilder"/>'s job and it works off the
-        /// anchors. This only asks whether there is any relationship at all between
-        /// these two signals, and below it there is nothing for the windows to refine.
+        /// This is the guard against measuring a subtitle file that belongs to
+        /// something else, and it has to be set well above what an unrelated pair of
+        /// films reaches rather than just above zero. Two films are both people
+        /// talking with gaps, and their scene structure alone — talky stretches
+        /// overlapping talky stretches — correlates further than intuition suggests:
+        /// on synthetic dialogue a genuine alignment scores around 0.75 and an
+        /// unrelated one around 0.10, so the gap is wide but the floor is not near
+        /// zero.
+        /// <para>
+        /// Set at a quarter, which is three times clear of the coincidences and three
+        /// times below a real match. The asymmetry is deliberate: too high reports a
+        /// good file as mismatched, which is visible, unrepaired and annoying; too low
+        /// lets a track for another film reach the fit, where it can be called
+        /// Drifting and <em>repaired</em>.
+        /// </para>
+        /// <para>
+        /// <b>Calibrated on synthetic dialogue and not yet on real audio.</b> Real VAD
+        /// is messier than a signal derived from the cues themselves, so a genuine
+        /// match on a difficult mix will score lower than 0.75. This is the first
+        /// number to check against a real library.
+        /// </para>
         /// </remarks>
-        public const double MinGlobalScore = 0.08;
+        public const double MinGlobalScore = 0.25;
+
+        /// <summary>
+        /// How much of its own span a track must fill with cues to be worth aligning.
+        /// </summary>
+        /// <remarks>
+        /// Real dialogue fills something like a quarter to a half of the stretch it
+        /// covers. A track at three per cent is signage, a commentary layer, or the
+        /// handful of translated lines that a forced track carries — and the aligner
+        /// does not fail on one, it returns a confident answer drawn from a dozen
+        /// coincidences. Forced tracks are already refused earlier by their flag; this
+        /// catches the ones nobody flagged.
+        /// </remarks>
+        public const double MinCueDensity = 0.05;
 
         /// <summary>Measures one track against the audio.</summary>
         /// <param name="speech">Where the audio has speech in it.</param>
@@ -130,7 +160,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
 
             var audioCoarse = SpeechSignal.FromSpans(speech, duration, CoarseBinSeconds);
 
-            if (audioCoarse.Coverage is <= 0.02 or >= 0.95)
+            if (audioCoarse.ContentCoverage is <= 0.02 or >= 0.95)
             {
                 // Either the noise floor was set so high that the film reads as silent,
                 // or so low that it reads as continuous speech. Both produce a signal
@@ -139,6 +169,19 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
                 return VadMeasurement.Nothing(
                     "the audio came back as almost all speech or almost all silence, "
                     + "which cannot be aligned against — the silence threshold is probably wrong for this mix");
+            }
+
+            var density = SpeechSignal.FromCues(cues, duration, CoarseBinSeconds).ContentCoverage;
+            if (density < MinCueDensity)
+            {
+                // A track with a line every couple of minutes is a signage or commentary
+                // layer, not dialogue. There is not enough of it to locate anything, and
+                // the correlation does not fail on it — it returns a confident number
+                // drawn from a handful of coincidences, which is the worst answer
+                // available.
+                return VadMeasurement.Nothing(
+                    "the track is too sparse to align — it holds a line every few minutes "
+                    + "rather than dialogue, so there is nothing to match the audio against");
             }
 
             var (scale, offset, score) = Global(audioCoarse, cues, duration, maxOffsetSeconds, considerFrameRates);

@@ -265,6 +265,41 @@ slightly *early*. `SignalCorrelator` tracks the winning position as an index int
 curve for that reason. Using the lag itself and testing it for `< 0` silently rejected
 every correctly timed file.
 
+**Two measurements can see a slope and cannot check one.** A line through two points
+passes through both exactly, so the residual is zero by construction and the test that
+asks whether a line was the right model cannot fire. `SyncVerdictBuilder` therefore
+reports `Unknown` at exactly two confident anchors rather than `Drifting`. This was a
+live fault, and the worst kind: an unrelated subtitle file produced a handful of
+coincidental matches, two survived, the fit was perfect, the verdict came back
+Drifting — which is *repairable* — and Cicerone would have written a "corrected" copy
+of a track belonging to another film. `TwoMeasurementsCanSeeASlopeAndCannotCheckOne`
+guards it. It is the same error as trusting one anchor, one step further along.
+
+**Padding is not agreement.** Both signals are laid out on a timeline long enough to
+hold either of them however far out the track is, so a late subtitle file has dead
+bins in front of it and the audio has dead bins after it. Those two dead regions agree
+perfectly, about nothing, *at every lag*. Correlating them scored a file five minutes
+out as a match. `SignalCorrelator` therefore correlates only between the first and last
+thing either side actually says, and every density judgement uses
+`SpeechSignal.ContentCoverage` rather than `Coverage` for the same reason.
+
+**`MinGlobalScore` is the wrong-film guard, and it is not near zero.** Two unrelated
+films are both people talking with gaps, and their scene structure alone correlates
+further than intuition suggests — around 0.10 on synthetic dialogue against 0.75 for a
+genuine match. The floor sits at 0.25: three times clear of the coincidences and three
+times below a real match. The asymmetry is deliberate, because the two failures are
+not equally bad. Too high reports a good file as mismatched, which is visible and
+unrepaired; too low lets another film's track reach the fit, where it can be called
+Drifting and repaired. **Calibrated on synthetic dialogue only** — real VAD is messier
+than a signal derived from the cues themselves, so this is the first number to check
+against a real library.
+
+**A track too sparse to align is refused rather than measured.** Below
+`VadAlignment.MinCueDensity` the correlator does not fail — it returns a confident
+number drawn from a dozen coincidences, which is the worst answer available. Forced
+tracks are already refused by their flag; this catches the signage and commentary
+layers nobody flagged.
+
 **Nothing overwrites a file Cicerone did not write — but the owner may delete
 anything.** These are not in tension. The first is about what the plugin does on its
 own initiative: a repair, a save from the editor, a transcript all go to a new sidecar
@@ -393,6 +428,11 @@ is the one thing Jellyfin checks before it will install.
 - The noise floor is one number for every film. A mix that is quiet throughout may
   need it lowered. An adaptive threshold — measuring the mix and setting the floor
   relative to it — is the obvious next thing if one number turns out not to do.
+- **Every threshold in the correlation is calibrated on synthetic dialogue.**
+  `MinGlobalScore`, `MinCueDensity` and the 0.15/0.55 floor and ceiling behind
+  `CorrelationPeak.MatchStrength` have never met real VAD output. The synthetic film
+  derives its cues from the speech spans themselves, which is kinder than reality.
+  Check these together on a real library before trusting a verdict.
 - Transcription pieces butt up against one another with no overlap, so a word spoken
   across a join can be lost or duplicated. Ten minutes apart, that is one word in
   six hundred seconds; an overlap-and-dedupe is the fix if it shows.

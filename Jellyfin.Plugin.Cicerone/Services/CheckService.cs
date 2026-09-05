@@ -359,6 +359,23 @@ namespace Jellyfin.Plugin.Cicerone.Services
                     + "a different cut, or the wrong film");
             }
 
+            if (measurement.Anchors.Count == 0)
+            {
+                // The whole file agreed well enough to be worth refining and then not
+                // one window could be pinned down. That is a real outcome — a mix the
+                // detector reads badly, or a track whose cues sit where the dialogue
+                // does only in the broadest sense — and it must not borrow the wording
+                // for an item nothing was listened to, because the audio was read in
+                // full.
+                return new SyncAssessment(
+                    Verdict.Unknown,
+                    Correction.None,
+                    [],
+                    0,
+                    "the track matches this film overall but no window could be pinned down closely "
+                    + "enough to measure — the silence threshold may not suit this mix");
+            }
+
             var correction = DriftFit.Fit(measurement.Anchors, config.SnapFrameRates);
 
             return SyncVerdictBuilder.Assess(

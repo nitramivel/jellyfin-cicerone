@@ -124,7 +124,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
             // never stops marks everything, and each would still produce a peak.
             if (audio.Count == 0 || cues.Count == 0
                 || audio.Active == 0 || cues.Active == 0
-                || audio.Coverage > 0.95 || cues.Coverage > 0.95)
+                || audio.ContentCoverage > 0.95 || cues.ContentCoverage > 0.95)
             {
                 return CorrelationPeak.None;
             }
@@ -155,7 +155,7 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
 
             for (var lag = from; lag <= to; lag++)
             {
-                var score = At(audio.Bins, cues.Bins, audioPrefix, cuePrefix, lag);
+                var score = At(audio, cues, audioPrefix, cuePrefix, lag);
                 curve[lag - from] = score;
 
                 if (score > best)
@@ -238,13 +238,35 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
         /// different stretch of the film with a different amount of talking in it, and
         /// using the whole signal's mean there measures the difference between two
         /// scenes instead of the agreement between two tracks.
+        /// <para>
+        /// <b>The overlap is narrowed further to where both signals actually have
+        /// content</b>, and that is not a refinement — without it the measurement is
+        /// wrong. Both signals are padded to a timeline long enough to hold either of
+        /// them however far out the track is, so a late subtitle file has dead bins in
+        /// front of it and the audio has dead bins after it. Those two dead regions
+        /// agree perfectly, about nothing, and they agree at <em>every</em> lag: a
+        /// file whose real offset lies outside the search range scores on its padding
+        /// alone and comes back matched. Correlating only between the first and last
+        /// thing either side actually says removes the entire effect.
+        /// </para>
         /// </remarks>
-        private static double At(bool[] audio, bool[] cues, int[] audioPrefix, int[] cuePrefix, int lag)
+        private static double At(
+            SpeechSignal audioSignal,
+            SpeechSignal cueSignal,
+            int[] audioPrefix,
+            int[] cuePrefix,
+            int lag)
         {
+            var audio = audioSignal.Bins;
+            var cues = cueSignal.Bins;
+
             // cues[i] lines up with audio[i - lag]: a positive lag means the subtitle
             // signal sits after the audio, which is a track that is late.
-            var firstCue = Math.Max(0, lag);
-            var lastCue = Math.Min(cues.Length, audio.Length + lag);
+            var firstCue = Math.Max(Math.Max(0, lag), Math.Max(cueSignal.FirstActive, audioSignal.FirstActive + lag));
+            var lastCue = Math.Min(
+                Math.Min(cues.Length, audio.Length + lag),
+                Math.Min(cueSignal.LastActive, audioSignal.LastActive + lag) + 1);
+
             var n = lastCue - firstCue;
 
             // Too little overlap and the coefficient is measuring a handful of bins,

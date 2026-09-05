@@ -127,6 +127,30 @@ namespace Jellyfin.Plugin.Cicerone.Core.Sync
                         $"only one window matched, so the offset is {Format(correction.OffsetSeconds)} and drift could not be measured at all"));
             }
 
+            if (confident == 2)
+            {
+                // A straight line through two points passes through both of them
+                // exactly, whatever the points are, so the residual is zero by
+                // construction and the test below — which is the only thing that ever
+                // asks whether a line was the right model — cannot run at all.
+                //
+                // That is not a technicality. A subtitle file for a different film
+                // produces a handful of coincidental matches; when exactly two of them
+                // survive, they define a line with no residual, and the verdict comes
+                // back Drifting, which is repairable. Cicerone would then write a
+                // "corrected" copy of a track belonging to another film. Two
+                // measurements can see a slope and cannot check one, and the honest
+                // report of that is that nothing was established.
+                return new SyncAssessment(
+                    Verdict.Unknown,
+                    correction,
+                    anchors,
+                    Math.Abs(correction.OffsetSeconds),
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"only two windows matched, out of {anchors.Count} measured — a line through two points fits them exactly whether or not it is the right line, so nothing about the timing could be established"));
+            }
+
             if (correction.ResidualSeconds > maxResidualSeconds)
             {
                 return new SyncAssessment(

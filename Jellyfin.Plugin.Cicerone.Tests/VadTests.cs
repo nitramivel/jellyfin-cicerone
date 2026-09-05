@@ -320,6 +320,92 @@ namespace Jellyfin.Plugin.Cicerone.Tests
         }
 
         [Fact]
+        public void ASubtitleFileForAnotherFilmIsNeverCalledRepairable()
+        {
+            // The failure this guards against was live and is the worst one available:
+            // an unrelated track scored just over the old floor, six windows produced
+            // two confident coincidences, a line through two points fits both exactly,
+            // and the verdict came back Drifting — which is repairable. Cicerone would
+            // then write a "corrected" copy of a track belonging to another film.
+            var speech = Film.Speech(seed: 3, minutes: 22);
+            var runtime = Film.Runtime(speech);
+            var other = Film.Cues(Film.Speech(seed: 99, minutes: 22));
+
+            var measurement = VadAlignment.Measure(speech, other, runtime);
+            var assessment = SyncVerdictBuilder.Assess(
+                measurement.Anchors, DriftFit.Fit(measurement.Anchors), runtime);
+
+            Assert.False(measurement.Matched);
+            Assert.False(assessment.Repairable);
+        }
+
+        [Fact]
+        public void ATrackFurtherOutThanTheSearchRangeIsNotQuietlyFitted()
+        {
+            // Five minutes out with a two-minute search range. The peak that matters
+            // cannot be reached, so the only question is whether something else gets
+            // believed instead.
+            var speech = Film.Speech(seed: 3, minutes: 22);
+            var far = Film.Cues(speech, 300.0);
+
+            var measurement = VadAlignment.Measure(speech, far, Film.Runtime(speech), 12, 120);
+
+            Assert.False(measurement.Matched);
+        }
+
+        [Fact]
+        public void PaddingDoesNotCountAsAgreement()
+        {
+            // Both signals are laid out on a timeline long enough to hold either of
+            // them however far out the track is, so a late file has dead bins in front
+            // of it and the audio has dead bins after it. Those two dead regions agree
+            // perfectly, about nothing, at every lag — and correlating them scored a
+            // file that is five minutes out as a match.
+            var speech = Film.Speech(seed: 3, minutes: 22);
+            var late = Film.Cues(speech, 240.0);
+            var duration = TimeSpan.FromSeconds(late[^1].End.TotalSeconds + 120);
+
+            var audio = SpeechSignal.FromSpans(speech, duration, 0.2);
+            var cues = SpeechSignal.FromCues(late, duration, 0.2);
+
+            // The padding is most of the difference between the two spans, and the
+            // content measure is what must not notice it.
+            Assert.True(audio.ContentCoverage > audio.Coverage);
+            Assert.True(cues.ContentCoverage > cues.Coverage);
+
+            var peak = SignalCorrelator.Best(audio, cues, 60);
+            Assert.True(peak.Score < 0.25, $"padding alone scored {peak.Score:0.000}");
+        }
+
+        [Fact]
+        public void ASignageTrackIsRefusedRatherThanMeasured()
+        {
+            // A line every couple of minutes is a signage or commentary layer. The
+            // correlator does not fail on one — it returns a confident number drawn
+            // from a dozen coincidences, which is the worst answer available.
+            var speech = Film.Speech(seed: 3, minutes: 22);
+            var full = Film.Cues(speech, 3.0);
+            var sparse = full.Where((c, i) => i % 20 == 0).ToList();
+
+            var measurement = VadAlignment.Measure(speech, sparse, Film.Runtime(speech));
+
+            Assert.NotNull(measurement.Failure);
+            Assert.Empty(measurement.Anchors);
+        }
+
+        [Fact]
+        public void AnItemWithNoRuntimeIsStillMeasurable()
+        {
+            // Jellyfin reports no runtime for some items. The timeline is then taken
+            // from what the audio and the cues themselves reach.
+            var speech = Film.Speech(seed: 3, minutes: 22);
+            var measurement = VadAlignment.Measure(speech, Film.Cues(speech, 4.0), TimeSpan.Zero);
+
+            Assert.True(measurement.Matched);
+            Assert.True(Math.Abs(DriftFit.Fit(measurement.Anchors).OffsetSeconds - 4.0) < 0.3);
+        }
+
+        [Fact]
         public void ATrackForThisFilmMatches()
         {
             var speech = Film.Speech();
