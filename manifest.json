@@ -7,6 +7,15 @@
     "owner": "nitramivel",
     "category": "General",
     "imageUrl": "",
-    "versions": []
+    "versions": [
+      {
+        "version": "0.1.0.0",
+        "changelog": "First release. Never installed on a server — see the status section of the README.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/nitramivel/jellyfin-cicerone/releases/download/v0.1.0.0/cicerone_0.1.0.0.zip",
+        "checksum": "a51f5f92bd6db50e21336c5587c7ff57",
+        "timestamp": "2026-09-05T02:31:24Z"
+      }
+    ]
   }
 ]
