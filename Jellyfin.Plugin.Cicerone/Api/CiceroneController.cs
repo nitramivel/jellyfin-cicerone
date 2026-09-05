@@ -25,6 +25,15 @@ namespace Jellyfin.Plugin.Cicerone.Api
     /// <param name="Budgeted">Whether the audio budget would stop it early.</param>
     public sealed record RunEstimateResponse(int Items, double AudioMinutes, decimal? CostUsd, bool Budgeted);
 
+    /// <summary>Subtitle text being saved from the manager.</summary>
+    /// <param name="Text">The whole file, as SRT.</param>
+    public sealed record SubtitleTextRequest(string? Text);
+
+    /// <summary>A hand-made timing change.</summary>
+    /// <param name="OffsetSeconds">How far to move the track. Positive delays it.</param>
+    /// <param name="Scale">The factor to stretch its clock by. 1 leaves the speed alone.</param>
+    public sealed record RetimeRequest(double OffsetSeconds, double Scale = 1.0);
+
     /// <summary>Cicerone's HTTP surface.</summary>
     /// <remarks>
     /// Every endpoint is admin-only. Unlike a plugin that draws something on a detail
@@ -39,6 +48,8 @@ namespace Jellyfin.Plugin.Cicerone.Api
         private readonly VerifyRunService _runService;
         private readonly ReportStore _reports;
         private readonly RunLogStore _runs;
+        private readonly SubtitleLibrary _subtitles;
+        private readonly MediaBrowser.Controller.Library.ILibraryManager _library;
         private readonly Services.Transcription.TranscriptionProviderFactory _providers;
         private readonly ILogger<CiceroneController> _logger;
 
@@ -46,18 +57,24 @@ namespace Jellyfin.Plugin.Cicerone.Api
         /// <param name="runService">The run service.</param>
         /// <param name="reports">Stored reports.</param>
         /// <param name="runs">Run history.</param>
+        /// <param name="subtitles">The subtitle manager's engine.</param>
+        /// <param name="library">Library access, for finding an item by name.</param>
         /// <param name="providers">Transcription backends, for the connection test.</param>
         /// <param name="logger">The logger.</param>
         public CiceroneController(
             VerifyRunService runService,
             ReportStore reports,
             RunLogStore runs,
+            SubtitleLibrary subtitles,
+            MediaBrowser.Controller.Library.ILibraryManager library,
             Services.Transcription.TranscriptionProviderFactory providers,
             ILogger<CiceroneController> logger)
         {
             _runService = runService;
             _reports = reports;
             _runs = runs;
+            _subtitles = subtitles;
+            _library = library;
             _providers = providers;
             _logger = logger;
         }
@@ -102,20 +119,28 @@ namespace Jellyfin.Plugin.Cicerone.Api
         [ProducesResponseType(StatusCodes.Status200OK)]
         public ActionResult<RunEstimateResponse> GetEstimate()
         {
-            var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var config = Config();
             var items = _runService.Eligible(config).Count;
 
             // One track per item. A disc rip with three English tracks costs the same
-            // as one — they share the transcript — so counting tracks would overstate
-            // it, and counting items understates only the rare item wanting two
-            // different languages checked.
-            var minutes = items * config.AudioSecondsPerItem(1) / 60.0;
+            // as one — they share the audio — so counting tracks would overstate it,
+            // and counting items understates only the rare item wanting two different
+            // languages checked.
+            //
+            // Under the speech-activity method that figure is zero, and saying so is
+            // the single most useful thing this endpoint now does: the answer to "what
+            // would it cost to check every episode I own" is nothing, and it used to be
+            // four figures.
+            var minutes = config.SyncMethod == SyncMethod.Transcript
+                ? items * config.AudioSecondsPerItem(1) / 60.0
+                : 0;
+
             var price = config.ResolveProfile()?.CostPerAudioMinute ?? 0;
 
             return Ok(new RunEstimateResponse(
                 items,
                 minutes,
-                price > 0 ? price * (decimal)minutes : null,
+                price > 0 && minutes > 0 ? price * (decimal)minutes : null,
                 config.AudioMinuteBudget > 0 && minutes > config.AudioMinuteBudget));
         }
 
@@ -230,6 +255,204 @@ namespace Jellyfin.Plugin.Cicerone.Api
             }
         }
 
+        /// <summary>Finds items by name, for the subtitle manager.</summary>
+        /// <param name="query">What to search for.</param>
+        /// <param name="limit">How many to return.</param>
+        /// <returns>The matches, closest first.</returns>
+        /// <remarks>
+        /// Its own endpoint rather than Jellyfin's, because the manager wants exactly
+        /// the items Cicerone can act on — things with a file and a runtime — and it
+        /// wants an episode labelled with the series it belongs to, which is the
+        /// difference between a usable list and forty rows all called "Episode 3".
+        /// </remarks>
+        [HttpGet("Search")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public ActionResult<object> Search([FromQuery] string? query, [FromQuery] int limit = 30)
+        {
+            var text = (query ?? string.Empty).Trim();
+            if (text.Length < 2)
+            {
+                return Ok(Array.Empty<object>());
+            }
+
+            var items = _library.GetItemList(new MediaBrowser.Controller.Entities.InternalItemsQuery
+            {
+                IncludeItemTypes =
+                [
+                    Jellyfin.Data.Enums.BaseItemKind.Movie,
+                    Jellyfin.Data.Enums.BaseItemKind.Episode,
+                ],
+                Recursive = true,
+                IsVirtualItem = false,
+                SearchTerm = text,
+                Limit = Math.Clamp(limit, 1, 100),
+            });
+
+            return Ok(items
+                .Where(i => !string.IsNullOrEmpty(i.Path))
+                .Select(i => new
+                {
+                    Id = i.Id,
+                    Name = i.Name ?? string.Empty,
+                    Series = (i as MediaBrowser.Controller.Entities.TV.Episode)?.SeriesName,
+                    Kind = i is MediaBrowser.Controller.Entities.TV.Episode ? "Episode" : "Movie",
+                    Year = i.ProductionYear,
+                    RuntimeSeconds = i.RunTimeTicks is { } t ? TimeSpan.FromTicks(t).TotalSeconds : 0,
+                })
+                .ToList());
+        }
+
+        /// <summary>Every subtitle an item has, wherever it came from.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <returns>The inventory.</returns>
+        [HttpGet("Subtitles/{itemId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public ActionResult<Core.Subtitles.SubtitleInventory> GetSubtitles([FromRoute] Guid itemId)
+        {
+            var inventory = _subtitles.Inventory(itemId, Config());
+            return inventory is null ? NotFound() : Ok(inventory);
+        }
+
+        /// <summary>Reads one subtitle out as SRT.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="sourceId">Which subtitle, as the inventory named it.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The text.</returns>
+        [HttpGet("Subtitles/{itemId}/{sourceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<object>> ReadSubtitle(
+            [FromRoute] Guid itemId,
+            [FromRoute] string sourceId,
+            CancellationToken cancellationToken)
+        {
+            var (text, error) = await _subtitles
+                .ReadAsync(itemId, sourceId, Config(), cancellationToken)
+                .ConfigureAwait(false);
+
+            return Ok(new { Ok = text is not null, Text = text, Message = error });
+        }
+
+        /// <summary>Saves edited subtitle text.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="sourceId">Which subtitle.</param>
+        /// <param name="body">The new text.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>What happened.</returns>
+        [HttpPost("Subtitles/{itemId}/{sourceId}/Save")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<SubtitleOutcome>> SaveSubtitle(
+            [FromRoute] Guid itemId,
+            [FromRoute] string sourceId,
+            [FromBody] SubtitleTextRequest body,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(body);
+
+            return Ok(await _subtitles
+                .SaveAsync(itemId, sourceId, body.Text ?? string.Empty, Config(), cancellationToken)
+                .ConfigureAwait(false));
+        }
+
+        /// <summary>Shifts or stretches a subtitle's timings.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="sourceId">Which subtitle.</param>
+        /// <param name="body">How far to move it.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>What happened.</returns>
+        [HttpPost("Subtitles/{itemId}/{sourceId}/Retime")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<SubtitleOutcome>> RetimeSubtitle(
+            [FromRoute] Guid itemId,
+            [FromRoute] string sourceId,
+            [FromBody] RetimeRequest body,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(body);
+
+            return Ok(await _subtitles
+                .RetimeAsync(itemId, sourceId, body.OffsetSeconds, body.Scale, Config(), cancellationToken)
+                .ConfigureAwait(false));
+        }
+
+        /// <summary>Saves a subtitle out as a sidecar file beside the media.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="sourceId">Which subtitle.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>What happened.</returns>
+        [HttpPost("Subtitles/{itemId}/{sourceId}/Extract")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<ActionResult<SubtitleOutcome>> ExtractSubtitle(
+            [FromRoute] Guid itemId,
+            [FromRoute] string sourceId,
+            CancellationToken cancellationToken)
+        {
+            return Ok(await _subtitles
+                .ExtractAsync(itemId, sourceId, Config(), cancellationToken)
+                .ConfigureAwait(false));
+        }
+
+        /// <summary>Deletes a subtitle file.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="sourceId">Which subtitle.</param>
+        /// <returns>What happened.</returns>
+        /// <remarks>
+        /// Only ever a file, and only ever one already listed for this item. The
+        /// manager asks twice before calling this; the server checks once more.
+        /// </remarks>
+        [HttpDelete("Subtitles/{itemId}/{sourceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public ActionResult<SubtitleOutcome> DeleteSubtitle(
+            [FromRoute] Guid itemId,
+            [FromRoute] string sourceId)
+        {
+            return Ok(_subtitles.Delete(itemId, sourceId, Config()));
+        }
+
+        /// <summary>Writes a subtitle track for an item by listening to the whole film.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="language">The language to write.</param>
+        /// <returns>Whether it started.</returns>
+        /// <remarks>
+        /// Started rather than awaited, and the run panel is where the answer appears.
+        /// This sends a film's entire audio to a transcriber a piece at a time; holding
+        /// an HTTP request open for that is not a request, it is a timeout waiting to
+        /// be blamed on the plugin.
+        /// </remarks>
+        [HttpPost("Transcribe/{itemId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public ActionResult<object> Transcribe([FromRoute] Guid itemId, [FromQuery] string? language)
+        {
+            if (_runService.Busy)
+            {
+                return Conflict(new { Message = "A run is already going." });
+            }
+
+            var config = Config();
+            var wanted = string.IsNullOrWhiteSpace(language)
+                ? config.Languages().FirstOrDefault() ?? string.Empty
+                : language;
+
+            // Deliberately not given the request's cancellation token: the browser
+            // navigating away must not abandon a transcription halfway through a film
+            // that has already been paid for.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _runService.TranscribeOneAsync(itemId, wanted, null, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Cicerone: transcribing {Item} failed", itemId);
+                }
+            });
+
+            return Ok(new { Started = true, Language = wanted });
+        }
+
         /// <summary>Everything Cicerone has concluded, with a tally over the top.</summary>
         /// <param name="verdict">Only items whose best track landed on this verdict.</param>
         /// <param name="limit">How many items to return.</param>
@@ -309,6 +532,9 @@ namespace Jellyfin.Plugin.Cicerone.Api
         /// and a block of zeroes is less code than an embedded file plus the plumbing
         /// to read it.
         /// </remarks>
+        private static PluginConfiguration Config() =>
+            Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
         private static byte[] SilentWav(TimeSpan duration)
         {
             const int Rate = 16000;

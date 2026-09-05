@@ -16,7 +16,11 @@ namespace Jellyfin.Plugin.Cicerone
         {
             serviceCollection.AddSingleton<FfmpegRunner>();
             serviceCollection.AddSingleton<AudioSampler>();
+            serviceCollection.AddSingleton<SpeechActivityReader>();
             serviceCollection.AddSingleton<SubtitleReader>();
+            serviceCollection.AddSingleton<FullTranscriber>();
+            serviceCollection.AddSingleton<SubtitleMaker>();
+            serviceCollection.AddSingleton<SubtitleLibrary>();
             serviceCollection.AddSingleton<TranscriptionProviderFactory>();
             serviceCollection.AddSingleton<RepairWriter>();
             serviceCollection.AddSingleton<CheckService>();

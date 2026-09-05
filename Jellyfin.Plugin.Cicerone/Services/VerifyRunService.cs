@@ -32,6 +32,7 @@ namespace Jellyfin.Plugin.Cicerone.Services
         private readonly CheckService _checks;
         private readonly ReportStore _reports;
         private readonly RunLogStore _runs;
+        private readonly SubtitleMaker _maker;
         private readonly ILogger<VerifyRunService> _logger;
         private readonly SemaphoreSlim _one = new(1, 1);
 
@@ -40,18 +41,21 @@ namespace Jellyfin.Plugin.Cicerone.Services
         /// <param name="checks">The per-item checker.</param>
         /// <param name="reports">Where results are kept.</param>
         /// <param name="runs">Run history and live progress.</param>
+        /// <param name="maker">Writes a track for an item that has none.</param>
         /// <param name="logger">The logger.</param>
         public VerifyRunService(
             ILibraryManager library,
             CheckService checks,
             ReportStore reports,
             RunLogStore runs,
+            SubtitleMaker maker,
             ILogger<VerifyRunService> logger)
         {
             _library = library;
             _checks = checks;
             _reports = reports;
             _runs = runs;
+            _maker = maker;
             _logger = logger;
         }
 
@@ -83,10 +87,14 @@ namespace Jellyfin.Plugin.Cicerone.Services
 
                 var lanes = config.Lanes();
 
-                // The estimate a lane holds while it works. One track's worth, which
-                // is what the run is quoted at below; the real figure replaces it the
-                // moment the report comes back.
-                var estimate = config.AudioSecondsPerItem(1);
+                // What a lane holds while it works. Under the speech-activity method a
+                // check sends no audio anywhere and the estimate is zero — the budget
+                // exists now to bound transcription, which is the only thing left that
+                // spends anything, and a lane about to transcribe holds a whole runtime
+                // rather than a couple of windows.
+                var estimate = config.SyncMethod == SyncMethod.Transcript
+                    ? config.AudioSecondsPerItem(1)
+                    : 0;
                 var budget = new RunBudget(config.AudioMinuteBudget * 60.0);
                 var done = 0;
 
@@ -144,6 +152,11 @@ namespace Jellyfin.Plugin.Cicerone.Services
                         finally
                         {
                             _runs.Left(item.Name);
+                        }
+
+                        if (config.TranscribeWhenMissing)
+                        {
+                            report = await FillGapsAsync(item, report, config, budget, ct).ConfigureAwait(false);
                         }
 
                         stopwatch.Stop();
@@ -204,6 +217,147 @@ namespace Jellyfin.Plugin.Cicerone.Services
             return report;
         }
 
+        /// <summary>Transcribes the languages an item turned out not to have.</summary>
+        /// <remarks>
+        /// <b>The only part of a run that can still spend money, and it is opt-in.</b>
+        /// It runs after the check rather than instead of it, because the check is what
+        /// establishes that the language is genuinely missing: an item can carry an
+        /// English track that turns out to be an image, or forced, or forty lines of
+        /// signage, and all three look like coverage until something reads them.
+        /// <para>
+        /// A whole runtime is reserved against the budget before the transcriber is
+        /// called, not after. Reserving what a transcription actually costs is the only
+        /// reason the ceiling means anything here: an item is a hundred times a check,
+        /// and finding out afterwards is finding out too late.
+        /// </para>
+        /// </remarks>
+        private async Task<ItemReport> FillGapsAsync(
+            BaseItem item,
+            ItemReport report,
+            PluginConfiguration config,
+            RunBudget budget,
+            CancellationToken cancellationToken)
+        {
+            if (report.MissingLanguages.Count == 0 || report.Error is not null)
+            {
+                return report;
+            }
+
+            var runtime = report.RuntimeSeconds;
+            var spent = 0.0;
+
+            foreach (var language in report.MissingLanguages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!budget.TryReserve(runtime))
+                {
+                    _logger.LogInformation(
+                        "Cicerone: not transcribing {Item} in {Language} — the run is at its audio budget",
+                        item.Name, language);
+                    break;
+                }
+
+                MadeSubtitle made;
+                try
+                {
+                    made = await _maker.MakeAsync(item, language, config, null, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    budget.Settle(runtime, 0);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    budget.Settle(runtime, 0);
+                    _logger.LogWarning(ex, "Cicerone: could not transcribe {Item}", item.Name);
+                    continue;
+                }
+
+                budget.Settle(runtime, made.AudioSeconds);
+                spent += made.AudioSeconds;
+
+                _logger.LogInformation(
+                    "Cicerone: {Item} in {Language} — {Message}", item.Name, language, made.Message);
+            }
+
+            // Folded into the item's own audio total so the run's cost, the report and
+            // the coverage tally all agree about what was spent on it.
+            return spent > 0 ? report with { AudioSeconds = report.AudioSeconds + spent } : report;
+        }
+
+        /// <summary>Transcribes one item now, as a run of its own.</summary>
+        /// <param name="itemId">The item.</param>
+        /// <param name="language">The language to write.</param>
+        /// <param name="progress">Where progress is reported.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>What happened.</returns>
+        /// <remarks>
+        /// Takes the same one-run-at-a-time lock as a library walk and reports through
+        /// the same run log, so the settings page shows it in the progress panel like
+        /// anything else. It is a run because it takes minutes: an HTTP request held
+        /// open for the length of a feature film is not a request, it is a mistake.
+        /// </remarks>
+        public async Task<MadeSubtitle> TranscribeOneAsync(
+            Guid itemId,
+            string language,
+            IProgress<double>? progress,
+            CancellationToken cancellationToken)
+        {
+            var item = _library.GetItemById(itemId);
+            if (item is null)
+            {
+                return MadeSubtitle.No("that item is not in the library");
+            }
+
+            if (!await _one.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                return MadeSubtitle.No("a run is already going — wait for it to finish, or stop it first");
+            }
+
+            var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                _runs.Begin("transcribe " + (item.Name ?? "one item"), 1);
+                _runs.Working(item.Name);
+
+                var made = await _maker.MakeAsync(item, language, config, progress, cancellationToken)
+                    .ConfigureAwait(false);
+
+                _runs.Left(item.Name);
+                _runs.Finished(new RunItem(
+                    item.Id,
+                    item.Name ?? string.Empty,
+                    [],
+                    0,
+                    made.AudioSeconds,
+                    Price(config, made.AudioSeconds),
+                    stopwatch.ElapsedMilliseconds,
+                    made.Ok ? null : made.Message));
+
+                _runs.End(made.Ok ? RunStatus.Completed : RunStatus.Failed, made.Ok ? null : made.Message);
+                return made;
+            }
+            catch (OperationCanceledException)
+            {
+                _runs.End(RunStatus.Cancelled);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _runs.End(RunStatus.Failed, ex.Message);
+                return MadeSubtitle.No(ex.Message);
+            }
+            finally
+            {
+                _one.Release();
+            }
+        }
+
         /// <summary>Every item a run would visit.</summary>
         /// <param name="config">The settings.</param>
         /// <returns>The items.</returns>
@@ -257,10 +411,15 @@ namespace Jellyfin.Plugin.Cicerone.Services
             }
         }
 
-        private static RunItem Record(ItemReport report, PluginConfiguration config, long elapsedMs)
+        private static decimal? Price(PluginConfiguration config, double audioSeconds)
         {
             var price = config.ResolveProfile()?.CostPerAudioMinute ?? 0;
-            var cost = price > 0 ? (decimal?)(price * (decimal)(report.AudioSeconds / 60.0)) : null;
+            return price > 0 && audioSeconds > 0 ? price * (decimal)(audioSeconds / 60.0) : null;
+        }
+
+        private static RunItem Record(ItemReport report, PluginConfiguration config, long elapsedMs)
+        {
+            var cost = Price(config, report.AudioSeconds);
 
             var tracks = report.Tracks.Select(t => new RunTrack(
                 t.Track.Index,

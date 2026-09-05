@@ -24,25 +24,29 @@ namespace Jellyfin.Plugin.Cicerone.Services
     /// apart the two are.
     /// </summary>
     /// <remarks>
-    /// The order of operations here is the plugin's whole economy.
+    /// The order of operations here is the plugin's whole economy, and the economy
+    /// changed: <b>under the speech-activity method not one step in this list spends
+    /// anything, and none of them touches the network.</b>
     /// <list type="number">
     /// <item>Tracks are filtered to the languages you asked for, before anything.</item>
-    /// <item>The language of each track is read from its own text — free.</item>
-    /// <item>Anchors are planned from the cue timings — free.</item>
-    /// <item><b>Audio is transcribed once per item</b>, and every track sharing that
-    /// audio is scored against the same transcript. Three English tracks cost what
-    /// one costs.</item>
-    /// <item>Each track is aligned, fitted and judged — free.</item>
+    /// <item>The language of each track is read from its own text.</item>
+    /// <item>The audio is read once per item for where it has speech in it — a
+    /// decode, and the expensive part by far — and every track wanting that stream is
+    /// correlated against the same reading. Three English tracks cost what one
+    /// costs, which was true of the transcript too and for the same reason.</item>
+    /// <item>Each track is fitted and judged.</item>
     /// </list>
-    /// Exactly one step in that list spends anything, and it is the only one that
-    /// touches the network. Everything above it exists to make sure the money is
-    /// spent on a question worth answering.
+    /// The transcript method is still here, still costs what it cost, and is still
+    /// selected by exactly one setting. What used to be the only way to answer the
+    /// question is now the way to answer a narrower one: whether the words match,
+    /// rather than whether the talking does.
     /// </remarks>
     public sealed class CheckService
     {
         private readonly IMediaSourceManager _mediaSources;
         private readonly SubtitleReader _subtitles;
         private readonly AudioSampler _audio;
+        private readonly SpeechActivityReader _speech;
         private readonly TranscriptionProviderFactory _providers;
         private readonly RepairWriter _repairs;
         private readonly ILogger<CheckService> _logger;
@@ -51,6 +55,7 @@ namespace Jellyfin.Plugin.Cicerone.Services
         /// <param name="mediaSources">Where a item's streams are read from.</param>
         /// <param name="subtitles">Subtitle extraction.</param>
         /// <param name="audio">Audio extraction.</param>
+        /// <param name="speech">Where the audio has speech in it.</param>
         /// <param name="providers">Transcription backends.</param>
         /// <param name="repairs">Where a corrected copy is written.</param>
         /// <param name="logger">The logger.</param>
@@ -58,6 +63,7 @@ namespace Jellyfin.Plugin.Cicerone.Services
             IMediaSourceManager mediaSources,
             SubtitleReader subtitles,
             AudioSampler audio,
+            SpeechActivityReader speech,
             TranscriptionProviderFactory providers,
             RepairWriter repairs,
             ILogger<CheckService> logger)
@@ -65,6 +71,7 @@ namespace Jellyfin.Plugin.Cicerone.Services
             _mediaSources = mediaSources;
             _subtitles = subtitles;
             _audio = audio;
+            _speech = speech;
             _providers = providers;
             _repairs = repairs;
             _logger = logger;
@@ -99,7 +106,7 @@ namespace Jellyfin.Plugin.Cicerone.Services
             }
 
             var profile = config.ResolveProfile();
-            if (profile is null)
+            if (profile is null && config.SyncMethod == SyncMethod.Transcript)
             {
                 return Failed("no transcription profile is configured");
             }
@@ -178,13 +185,13 @@ namespace Jellyfin.Plugin.Cicerone.Services
             {
                 return new ItemReport(
                     item.Id, item.Name ?? string.Empty, kind, series, DateTime.UtcNow, version,
-                    runtime.TotalSeconds, reports, Missing(languages, reports), 0, profile.Model, null);
+                    runtime.TotalSeconds, reports, Missing(languages, reports), 0, profile?.Model, null);
             }
 
-            var provider = _providers.Create(profile);
-
             // Grouped by the audio track each subtitle track wants to be checked
-            // against. Everything in a group hears the same clips.
+            // against. Everything in a group is measured against the same audio, which
+            // is what makes three English tracks cost what one costs — a decode under
+            // the speech-activity method, and a transcript under the other.
             var groups = toAlign
                 .GroupBy(t => AudioPlan.ChooseAudio(audioTracks, t.Language)?.Index ?? audioTracks[0].Index)
                 .ToList();
@@ -195,46 +202,28 @@ namespace Jellyfin.Plugin.Cicerone.Services
 
                 var members = group.ToList();
 
-                // Anchors are planned from the fullest track in the group. Any of them
-                // would do — the planner is looking for where the film is talkative,
-                // which is a property of the film — and the fullest has the most cues
-                // to read that from.
-                var planFrom = members
-                    .OrderByDescending(t => contents[t.Index].Clean.Count)
-                    .First();
+                var assessments = config.SyncMethod == SyncMethod.SpeechActivity
+                    ? await BySpeechActivityAsync(
+                            item.Path, group.Key, members, contents, runtime, config, cancellationToken)
+                        .ConfigureAwait(false)
+                    : await ByTranscriptAsync(
+                            item.Path, group.Key, members, contents, runtime, config, profile!,
+                            cancellationToken)
+                        .ConfigureAwait(false);
 
-                var anchors = AnchorPlanner.Plan(
-                    contents[planFrom.Index].Clean,
-                    runtime,
-                    config.AnchorCount,
-                    TimeSpan.FromSeconds(config.AnchorWindowSeconds),
-                    config.HeadTrimPercent,
-                    config.TailTrimPercent);
-
-                if (anchors.Count == 0)
-                {
-                    foreach (var track in members)
-                    {
-                        reports.Add(new TrackReport(
-                            track, contents[track.Index].Clean.Count, languageGuesses.GetValueOrDefault(track.Index),
-                            false, null, "there was no stretch of dialogue long enough to listen to"));
-                    }
-
-                    continue;
-                }
-
-                var hint = profile.HintLanguage ? LanguageCodes.Normalize(planFrom.Language) : null;
-
-                var transcript = await ListenAsync(
-                        item.Path, anchors, group.Key, config, provider,
-                        string.IsNullOrEmpty(hint) ? null : hint, cancellationToken)
-                    .ConfigureAwait(false);
-
-                audioSeconds += transcript.Sum(t => t.Anchor.Duration.TotalSeconds);
+                audioSeconds += assessments.AudioSeconds;
 
                 foreach (var track in members)
                 {
-                    var assessment = Align(contents[track.Index].Clean, transcript, runtime, config);
+                    if (assessments.Skipped is { } why)
+                    {
+                        reports.Add(new TrackReport(
+                            track, contents[track.Index].Clean.Count,
+                            languageGuesses.GetValueOrDefault(track.Index), false, null, why));
+                        continue;
+                    }
+
+                    var assessment = assessments.ByTrack[track.Index];
 
                     string? repaired = null;
                     if (ShouldRepair(assessment, config))
@@ -273,8 +262,164 @@ namespace Jellyfin.Plugin.Cicerone.Services
                 reports.OrderBy(r => r.Track.Index).ToList(),
                 Missing(languages, reports),
                 audioSeconds,
-                profile.Model,
+                config.SyncMethod == SyncMethod.Transcript ? profile?.Model : "speech activity",
                 null);
+        }
+
+        /// <summary>What measuring a group of tracks produced.</summary>
+        /// <param name="ByTrack">One assessment per track, by stream index.</param>
+        /// <param name="AudioSeconds">How much audio had to be paid for.</param>
+        /// <param name="Skipped">Why the whole group could not be measured, when it could not.</param>
+        private sealed record GroupResult(
+            IReadOnlyDictionary<int, SyncAssessment> ByTrack,
+            double AudioSeconds,
+            string? Skipped);
+
+        /// <summary>
+        /// Measures every track in a group by correlating it against the audio's own
+        /// speech.
+        /// </summary>
+        /// <remarks>
+        /// <b>The default, and it costs a decode and nothing else.</b> The audio is
+        /// read once for the whole group — the expensive part by far, and shared by
+        /// every track wanting that stream, exactly as the transcript used to be —
+        /// and each track is then slid over it independently.
+        /// <para>
+        /// What comes out is a list of <see cref="AnchorPoint"/>, which is the same
+        /// evidence the transcript method produced, so the fit, the frame-rate
+        /// snapping, the verdict and the repair are all the code that was already
+        /// here and already tested.
+        /// </para>
+        /// </remarks>
+        private async Task<GroupResult> BySpeechActivityAsync(
+            string path,
+            int audioStreamIndex,
+            IReadOnlyList<TrackCandidate> members,
+            IReadOnlyDictionary<int, TrackContent> contents,
+            TimeSpan runtime,
+            PluginConfiguration config,
+            CancellationToken cancellationToken)
+        {
+            var activity = await _speech.ReadAsync(
+                    path, audioStreamIndex, runtime, config.VadNoiseFloorDb, config.VadMinSilenceSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!activity.Ok)
+            {
+                return new GroupResult(
+                    new Dictionary<int, SyncAssessment>(), 0,
+                    "the audio could not be listened to: " + (activity.Error ?? "no speech was found"));
+            }
+
+            var byTrack = new Dictionary<int, SyncAssessment>();
+
+            foreach (var track in members)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var measurement = VadAlignment.Measure(
+                    activity.Spans,
+                    contents[track.Index].Clean,
+                    runtime,
+                    config.VadWindowCount,
+                    config.MaxOffsetSeconds,
+                    config.SnapFrameRates);
+
+                byTrack[track.Index] = Judge(measurement, runtime, config);
+            }
+
+            // Nothing was sent anywhere, so nothing was spent. This is the whole point
+            // of the method and the reason a library of episodes is now checkable.
+            return new GroupResult(byTrack, 0, null);
+        }
+
+        /// <summary>Turns a correlation into the same kind of verdict a transcript gave.</summary>
+        private static SyncAssessment Judge(
+            VadMeasurement measurement,
+            TimeSpan runtime,
+            PluginConfiguration config)
+        {
+            if (measurement.Failure is { } failure)
+            {
+                return new SyncAssessment(Verdict.Unknown, Correction.None, [], 0, failure);
+            }
+
+            if (!measurement.Matched)
+            {
+                // No position anywhere agreed. Under the transcript method this was
+                // "words in common with nothing"; it is the same conclusion and it is
+                // now reached over the whole file rather than over five windows.
+                return new SyncAssessment(
+                    Verdict.Mismatched,
+                    Correction.None,
+                    measurement.Anchors,
+                    0,
+                    "the dialogue in this file never lines up with these subtitles at any offset — "
+                    + "a different cut, or the wrong film");
+            }
+
+            var correction = DriftFit.Fit(measurement.Anchors, config.SnapFrameRates);
+
+            return SyncVerdictBuilder.Assess(
+                measurement.Anchors, correction, runtime, config.ToleranceSeconds, config.MaxResidualSeconds);
+        }
+
+        /// <summary>Measures a group by transcribing a few windows and matching the words.</summary>
+        /// <remarks>
+        /// The original method, kept and unchanged. It answers one question the
+        /// correlation cannot — whether the words are the <em>same words</em>, rather
+        /// than whether the talking happens at the same moments — which is worth having
+        /// on a library where a subtitle file for the wrong film has actually turned up.
+        /// It costs what it always cost, which is why it is no longer the default.
+        /// </remarks>
+        private async Task<GroupResult> ByTranscriptAsync(
+            string path,
+            int audioStreamIndex,
+            IReadOnlyList<TrackCandidate> members,
+            IReadOnlyDictionary<int, TrackContent> contents,
+            TimeSpan runtime,
+            PluginConfiguration config,
+            TranscriptionProfile profile,
+            CancellationToken cancellationToken)
+        {
+            // Anchors are planned from the fullest track in the group. Any of them
+            // would do — the planner is looking for where the film is talkative,
+            // which is a property of the film — and the fullest has the most cues
+            // to read that from.
+            var planFrom = members
+                .OrderByDescending(t => contents[t.Index].Clean.Count)
+                .First();
+
+            var anchors = AnchorPlanner.Plan(
+                contents[planFrom.Index].Clean,
+                runtime,
+                config.AnchorCount,
+                TimeSpan.FromSeconds(config.AnchorWindowSeconds),
+                config.HeadTrimPercent,
+                config.TailTrimPercent);
+
+            if (anchors.Count == 0)
+            {
+                return new GroupResult(
+                    new Dictionary<int, SyncAssessment>(), 0,
+                    "there was no stretch of dialogue long enough to listen to");
+            }
+
+            var hint = profile.HintLanguage ? LanguageCodes.Normalize(planFrom.Language) : null;
+
+            var transcript = await ListenAsync(
+                    path, anchors, audioStreamIndex, config, _providers.Create(profile),
+                    string.IsNullOrEmpty(hint) ? null : hint, cancellationToken)
+                .ConfigureAwait(false);
+
+            var byTrack = new Dictionary<int, SyncAssessment>();
+            foreach (var track in members)
+            {
+                byTrack[track.Index] = Align(contents[track.Index].Clean, transcript, runtime, config);
+            }
+
+            return new GroupResult(byTrack, transcript.Sum(t => t.Anchor.Duration.TotalSeconds), null);
         }
 
         /// <summary>What one anchor's audio turned into.</summary>

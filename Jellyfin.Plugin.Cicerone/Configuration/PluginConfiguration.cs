@@ -7,6 +7,22 @@ using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.Cicerone.Configuration
 {
+    /// <summary>How Cicerone measures a track against the dialogue.</summary>
+    public enum SyncMethod
+    {
+        /// <summary>
+        /// Correlate when the subtitles claim somebody is speaking against when the
+        /// audio says somebody is. Free, local, and over the whole file.
+        /// </summary>
+        SpeechActivity = 0,
+
+        /// <summary>
+        /// Transcribe a few windows of audio and match the words. Costs money per
+        /// item; kept for the cases where the words themselves are the question.
+        /// </summary>
+        Transcript = 1,
+    }
+
     /// <summary>What Cicerone does about a track it finds to be wrong.</summary>
     public enum RepairMode
     {
@@ -59,6 +75,74 @@ namespace Jellyfin.Plugin.Cicerone.Configuration
         /// which is true and sends the owner looking for a sync problem.
         /// </remarks>
         public bool VerifyLanguage { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets how a track's timing is measured.
+        /// </summary>
+        /// <remarks>
+        /// <b>Speech activity, and the transcript is the exception now.</b> Sync is a
+        /// question about <em>when</em> somebody spoke, and answering it does not
+        /// require knowing <em>what</em> they said — so it does not require a model, a
+        /// network call or a bill. Correlating the two speech patterns is free, runs
+        /// locally, and reads the whole file rather than the few windows a per-item
+        /// charge would stretch to, which makes it strictly better evidence as well as
+        /// cheaper.
+        /// <para>
+        /// The transcript method is kept because it can do one thing this cannot: tell
+        /// two films apart by their words rather than by their rhythm. It is worth
+        /// having on a library where that has actually gone wrong, and it is worth
+        /// nobody's money on a library where it has not.
+        /// </para>
+        /// </remarks>
+        public SyncMethod SyncMethod { get; set; } = SyncMethod.SpeechActivity;
+
+        /// <summary>Gets or sets the level below which audio counts as silence, in dBFS.</summary>
+        public double VadNoiseFloorDb { get; set; } = Core.Audio.VadPlan.DefaultNoiseFloorDb;
+
+        /// <summary>Gets or sets how long a quiet stretch must run to count as silence.</summary>
+        public double VadMinSilenceSeconds { get; set; } = Core.Audio.VadPlan.DefaultMinSilenceSeconds;
+
+        /// <summary>
+        /// Gets or sets how many windows the speech-activity method measures a track in.
+        /// </summary>
+        /// <remarks>
+        /// Twelve rather than five, and the reason is that these windows are free.
+        /// Under the transcript method every window was two more minutes on the bill,
+        /// so five was a compromise between seeing the slope and paying for it; there
+        /// is nothing to compromise here, and more measurements make the fit survive
+        /// more of them landing in a silence.
+        /// </remarks>
+        public int VadWindowCount { get; set; } = 12;
+
+        /// <summary>
+        /// Gets or sets whether a run transcribes items that have no readable track.
+        /// </summary>
+        /// <remarks>
+        /// <b>Off, and it is the only setting here that can run up a bill.</b> Now that
+        /// checking is free, this is the one thing left that costs money — and unlike
+        /// the old per-item charge it buys something that was not there before rather
+        /// than an opinion about something that was. It is still a whole film's audio
+        /// per item, so it is still off until somebody turns it on.
+        /// </remarks>
+        public bool TranscribeWhenMissing { get; set; }
+
+        /// <summary>Gets or sets how long each piece of a full transcription is, in seconds.</summary>
+        /// <remarks>
+        /// Ten minutes. Whisper's hosted endpoint takes files up to 25 MB, which at
+        /// 16 kbit/s mono Opus is something over three hours — so the limit is not what
+        /// decides this. What decides it is that a failed request costs the whole piece,
+        /// and ten minutes is a tolerable amount of work to lose and repeat.
+        /// </remarks>
+        public int TranscribeChunkSeconds { get; set; } = 600;
+
+        /// <summary>Gets or sets the marker in the name of a track Cicerone transcribed.</summary>
+        /// <remarks>
+        /// Distinct from <see cref="RepairSuffix"/> because the two are not the same
+        /// kind of file and should never be confused in a folder listing: one is
+        /// somebody's subtitles with the timings corrected, the other is a machine's
+        /// account of what it heard.
+        /// </remarks>
+        public string HeardSuffix { get; set; } = "cicerone-heard";
 
         /// <summary>Gets or sets how many windows of audio each track is checked against.</summary>
         /// <remarks>

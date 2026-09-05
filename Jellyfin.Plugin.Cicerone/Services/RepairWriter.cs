@@ -119,21 +119,63 @@ namespace Jellyfin.Plugin.Cicerone.Services
                 return null;
             }
 
-            var name = SidecarName(
-                Path.GetFileName(item.Path), track.Language, config.RepairSuffix, track.IsHearingImpaired);
+            return await WriteCuesAsync(
+                    item,
+                    Retiming.Apply(cues, correction),
+                    track.Language,
+                    config.RepairSuffix,
+                    track.IsHearingImpaired,
+                    config.RepairMode == RepairMode.WriteSidecarAndRefresh,
+                    config,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
-            var text = SrtWriter.Write(Retiming.Apply(cues, correction));
+        /// <summary>Writes a set of cues out as a sidecar beside the media.</summary>
+        /// <param name="item">The item.</param>
+        /// <param name="cues">The cues to write.</param>
+        /// <param name="language">The language to name the file for.</param>
+        /// <param name="suffix">The marker that identifies the file as Cicerone's.</param>
+        /// <param name="hearingImpaired">Whether to keep the SDH flag in the name.</param>
+        /// <param name="refresh">Whether to ask the server to rescan afterwards.</param>
+        /// <param name="config">The settings.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>Where it was written, or null when it could not be.</returns>
+        /// <remarks>
+        /// Shared by every route that produces a subtitle file — a repair, a
+        /// transcription, and a copy saved out of the manager — because all three have
+        /// exactly the same two things to get right: the name Jellyfin's scanner will
+        /// parse, and the write-to-a-temporary-name-and-move that stops an interrupted
+        /// run leaving half a file a player will load.
+        /// </remarks>
+        public async Task<string?> WriteCuesAsync(
+            BaseItem item,
+            IReadOnlyList<Cue> cues,
+            string language,
+            string suffix,
+            bool hearingImpaired,
+            bool refresh,
+            PluginConfiguration config,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(item);
+            ArgumentNullException.ThrowIfNull(cues);
+            ArgumentNullException.ThrowIfNull(config);
 
-            // UTF-8 without a BOM. Some players treat a BOM as the first character of
-            // the first cue's sequence number and refuse the whole file.
-            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            if (cues.Count == 0 || string.IsNullOrWhiteSpace(item.Path))
+            {
+                return null;
+            }
+
+            var name = SidecarName(Path.GetFileName(item.Path), language, suffix, hearingImpaired);
+            var text = SrtWriter.Write(cues);
 
             if (config.WriteBesideMedia)
             {
                 var beside = Path.Combine(Path.GetDirectoryName(item.Path) ?? string.Empty, name);
-                if (await TryWriteAsync(beside, text, encoding, cancellationToken).ConfigureAwait(false))
+                if (await WriteTextAsync(beside, text, cancellationToken).ConfigureAwait(false))
                 {
-                    if (config.RepairMode == RepairMode.WriteSidecarAndRefresh)
+                    if (refresh)
                     {
                         Refresh(item);
                     }
@@ -142,15 +184,40 @@ namespace Jellyfin.Plugin.Cicerone.Services
                 }
             }
 
-            // A read-only bind mount is a common arrangement, and a repair in the data
+            // A read-only bind mount is a common arrangement, and a file in the data
             // directory is still something the owner can copy out. It is explicitly
             // not equivalent: Jellyfin will not pick a subtitle up from there, so the
             // report says where the file went.
             var fallback = Path.Combine(DataDirectory(), item.Id.ToString("N", CultureInfo.InvariantCulture), name);
-            return await TryWriteAsync(fallback, text, encoding, cancellationToken).ConfigureAwait(false)
+            return await WriteTextAsync(fallback, text, cancellationToken).ConfigureAwait(false)
                 ? fallback
                 : null;
         }
+
+        /// <summary>Writes text to a path, atomically.</summary>
+        /// <param name="path">Where to write.</param>
+        /// <param name="text">What to write.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>Whether it landed.</returns>
+        /// <remarks>
+        /// Public because the subtitle manager saves through it too, and the atomic
+        /// move is the whole reason this is not a call to
+        /// <see cref="File.WriteAllTextAsync(string, string?, CancellationToken)"/>.
+        /// <b>It applies no ownership rule of its own</b> — deciding whether a
+        /// particular file may be written is the caller's job, and for anything the
+        /// owner did not explicitly ask for the answer is no.
+        /// </remarks>
+        public Task<bool> WriteTextAsync(string path, string text, CancellationToken cancellationToken)
+        {
+            // UTF-8 without a BOM. Some players treat a BOM as the first character of
+            // the first cue's sequence number and refuse the whole file.
+            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            return TryWriteAsync(path, text, encoding, cancellationToken);
+        }
+
+        /// <summary>Asks the server to notice a file that has just appeared.</summary>
+        /// <param name="item">The item it belongs to.</param>
+        public void RequestRefresh(BaseItem item) => Refresh(item);
 
         /// <summary>The directory Cicerone keeps its own files in.</summary>
         /// <returns>The path.</returns>

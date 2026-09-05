@@ -1,23 +1,33 @@
 # Cicerone — Jellyfin plugin
 
 Checks that a subtitle track is the language it claims to be and is timed to the
-dialogue it sits over. It cuts real audio out of the media file at several planned
-moments, has a speech-to-text model say what is in each clip, and measures the
-difference between when a word was **heard** and when the subtitle claims it was
-**said**.
+dialogue it sits over. It reads the audio for where somebody is speaking, slides the
+subtitle track over that until the two agree, and reports the difference — for
+nothing, locally, over the whole file.
 
 **The audio is the ground truth; the subtitle file is the claim.** Never the other
 way round. Everything the plugin outputs is a difference between two clocks, and the
-audio clock is defined by where ffmpeg actually started reading.
+audio clock is defined by what ffmpeg actually heard.
 
-**Scope discipline:** Cicerone grades and repairs the subtitles you already have. It
-does not download them — Bazarr and the Open Subtitles plugin fetch, this verifies —
-and it is not a rules engine. Reject feature requests that amount to "also go and
-get subtitles".
+**Scope discipline:** Cicerone grades, repairs and manages the subtitles you have,
+and will write one for an item that has none by listening to it. It still does not
+**download** them — Bazarr and the Open Subtitles plugin fetch, this verifies — and
+it is not a rules engine. Reject feature requests that amount to "also go and get
+subtitles from a subtitle site".
 
 ---
 
 ## Status: BUILDS CLEAN, NEVER INSTALLED
+
+**The measurement changed.** Sync was originally answered by transcribing five
+windows per item and matching the words. It is now answered by correlating speech
+activity — ffmpeg's own `silencedetect` against the cue on/off pattern — which is
+free, local, and reads the whole file instead of two and a half minutes of it. The
+transcript method survives as a setting, because it can tell two films apart by their
+words where a correlation can only compare their rhythm. Transcription's real job is
+now writing a track for an item that has none.
+
+
 
 Compiles against `Jellyfin.Controller` 10.11.11 on .NET 9 with warnings as errors, and
 158 tests pass. Every Jellyfin API call that was written from the sibling plugins'
@@ -64,19 +74,28 @@ Plugin GUID: `83004bd9-e2d6-4e13-9f3a-73bb12ef1f96`.
 
 ```text
 Core/          pure, no I/O, no Jellyfin types — all of it unit tested
-  Subtitles/   SRT parse and write, cue cleaning, the plain track record
-  Sync/        the whole measurement: tokenizing, anchor planning, the offset
-               vote, the drift fit, frame rate ratios, the verdict, retiming
+  Subtitles/   SRT parse and write, cue cleaning, the plain track record,
+               transcript-to-cues, and the sidecar naming rules the manager
+               decides ownership by
+  Sync/        the whole measurement: the speech signal, the correlator, the
+               windowed alignment, the drift fit, frame rate ratios, the verdict,
+               retiming — and the transcript path's tokenizing, anchor planning
+               and offset vote, still here and still used by the other method
   Language/    script and function-word identification, ISO code normalisation
-  Audio/       ffmpeg argument construction, audio track choice
+  Audio/       ffmpeg argument construction (clips and silencedetect), audio
+               track choice
   Reports/     the stored per-item report shape and the library-wide tally
   Runs/        run log document shape, RunEstimate (throughput → time left) and
                RunBudget (the audio ceiling, shared across lanes)
 Services/      everything that touches a process, a file, an API or Jellyfin
   FfmpegRunner            process handling, below-normal priority
   AudioSampler            drives ffmpeg, cuts the clips
+  SpeechActivityReader    drives ffmpeg, reads where the speech is
+  SubtitleLibrary         the manager: list, read, save, retime, extract, delete
+  SubtitleMaker           writes a track for an item that has none
   SubtitleReader          ISubtitleEncoder → cues
-  Transcription/          ITranscriptionProvider, OpenAI-shaped, Google, retry
+  Transcription/          ITranscriptionProvider, OpenAI-shaped, Google, retry,
+                          FullTranscriber (whole item, in pieces)
   CheckService            per-item orchestration — the economy lives here
   RepairWriter            corrected sidecar, never an in-place edit
   ReportStore             one JSON per item, cached in memory
@@ -208,6 +227,58 @@ never persisted. A run whose file still says `running` with no process behind it
 reported as **abandoned**, worked out when the file is read — the one thing a dead
 process cannot do is write that it died.
 
+**Sync is a question about when somebody spoke, not about what they said.** That is
+the whole reason the method changed. A transcript answers a harder question than the
+one being asked and charges per item for it; correlating speech activity answers the
+actual question for free, and — because it is free — over the whole file rather than
+over the five windows a bill would stretch to. It is the cheaper option *and* the
+better evidence, which is rare enough to be worth saying plainly. The transcript
+method is kept for the one thing it does better: two unrelated films both consist of
+people talking with gaps, and only the words tell them apart with certainty.
+
+**The correlation produces anchors, not an answer.** `VadAlignment` returns a list of
+`AnchorPoint` — the identical shape the transcript method produced — so `DriftFit`,
+the frame-rate snapping, `SyncVerdictBuilder` and the repair path are all untouched
+and all still tested by the tests that were already there. Anything measuring sync in
+future should produce anchors too; the moment something returns a verdict directly,
+the drift fit stops being the single place that decides what a line through the
+measurements means.
+
+**Confidence is read off the prominence for a wide search and off the score for a
+narrow one.** They are not interchangeable and using the wrong one produces zero
+usable measurements, which is exactly what happened first time. Over hundreds of
+lags, how far the peak stands above the rest of the curve is the only honest measure —
+a coincidence scores well but not *unusually* well. Over a four-second band the curve
+is one peak and its own shoulders, every lag tried is nearly the answer, and
+prominence collapses to nothing; what survives there is the coefficient itself, which
+is absolute — a real alignment sits around 0.7 and an unrelated one around 0.04.
+
+**The global pass exists to make the windowed pass possible.** A PAL-drifting file is
+five minutes out by the end and drifts twenty-five seconds *within* a ten-minute
+window, which smears that window's peak across half a minute. Trying each frame-rate
+ratio over the whole file first both locates the track and removes the smear, so each
+window then refines a residual of a second or two at fifty-times finer resolution.
+
+**A negative lag is a real answer, not a sentinel.** Subtitle authors pull a cue up a
+beat before the line so the reader is not chasing it, so a perfectly timed track peaks
+slightly *early*. `SignalCorrelator` tracks the winning position as an index into the
+curve for that reason. Using the lag itself and testing it for `< 0` silently rejected
+every correctly timed file.
+
+**Nothing overwrites a file Cicerone did not write — but the owner may delete
+anything.** These are not in tension. The first is about what the plugin does on its
+own initiative: a repair, a save from the editor, a transcript all go to a new sidecar
+carrying a marker, and the original survives. The second is about a manager, which
+exists precisely so somebody can remove the four subtitle files that have piled up
+beside a film; refusing that would not be caution, it would be making the owner do the
+same thing in a file manager with less information. The delete button asks twice and
+never touches an embedded stream, because removing one means rewriting the film.
+
+**The two markers must not be prefixes of one another in the classifier's eyes.**
+`cicerone` and `cicerone-heard` are matched as whole dot-separated tokens, and the
+transcript marker is tested first. Match on substrings and every heard track files as
+a repair — and then a repair offers to overwrite it.
+
 **A lane holds what it is about to spend.** `RunBudget` reserves the per-item estimate
 before a lane starts and settles the real figure when the report comes back, because a
 ceiling tested against what has been *spent* is no ceiling once items run several at a
@@ -264,6 +335,10 @@ answering, and the measurement being right.
 A film whose subtitles are known-good and one known to be a PAL-drift file are the
 two worth trying first; the second is the one the whole design exists for.
 
+Under the speech-activity method, **Try one item** needs no transcription profile at
+all and costs nothing, so it can be run on anything immediately. The profile only has
+to work before the Subtitles tab is asked to write a track by listening.
+
 ### 3. What is already done
 
 For the avoidance of re-doing it:
@@ -306,10 +381,23 @@ is the one thing Jellyfin checks before it will install.
 ### 6. Not built, deliberately or otherwise
 
 - No health check task (Curator has one; this has no equivalent yet).
-- No per-item detail view in the settings page beyond the coverage table.
 - The transcript providers are unexercised: no HTTP call has ever been made. The
   response parsing is tested against captured shapes, the sending of the request is
-  not.
+  not — and `FullTranscriber` now depends on that path working for a hundred requests
+  in a row rather than five.
+- **`silencedetect` has never been run.** The argument string is asserted on and the
+  log parser is tested against captured output, but no ffmpeg has ever produced that
+  output here. It is the single most important thing to check on a real server: if the
+  filter chain is wrong, every item comes back "almost all speech or almost all
+  silence" and the plugin measures nothing.
+- The noise floor is one number for every film. A mix that is quiet throughout may
+  need it lowered. An adaptive threshold — measuring the mix and setting the floor
+  relative to it — is the obvious next thing if one number turns out not to do.
+- Transcription pieces butt up against one another with no overlap, so a word spoken
+  across a join can be lost or duplicated. Ten minutes apart, that is one word in
+  six hundred seconds; an overlap-and-dedupe is the fix if it shows.
+- The manager edits SRT as text. Per-cue editing, and reading a not-yet-scanned `.ass`
+  sidecar, both wait for the server's scan to make the conversion available.
 
 ---
 

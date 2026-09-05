@@ -131,6 +131,103 @@
                 .cicTallyItem { font-size: 0.92em; }
                 .cicTallyCount { font-weight: 700; font-variant-numeric: tabular-nums; }
 
+                /* ---------------------------------------------- subtitle manager */
+
+                /* A search box and its button on one line. Two rows for two controls
+                   that are one action reads as a form to fill in rather than as a
+                   thing to type into and press. */
+                .cicFind { display: flex; gap: 0.6em; align-items: stretch; margin: 0.4em 0 0.2em; }
+                .cicFind input, .cicFind select { flex: 1 1 auto; min-width: 0; }
+                .cicFind button { flex: 0 0 auto; }
+
+                .cicResults {
+                    border: 1px solid rgba(127,127,127,0.28); border-radius: 8px;
+                    margin-top: 0.5em; max-height: 20em; overflow-y: auto;
+                }
+                .cicResult {
+                    display: block; width: 100%; text-align: left; background: none; border: 0;
+                    border-bottom: 1px solid rgba(127,127,127,0.16);
+                    color: inherit; font: inherit; padding: 0.6em 0.85em; cursor: pointer;
+                }
+                .cicResult:last-child { border-bottom: 0; }
+                .cicResult:hover, .cicResult:focus { background: rgba(255,255,255,0.07); outline: none; }
+                .cicResultName { font-weight: 600; }
+                .cicResultMeta { font-size: 0.85em; opacity: 0.65; margin-top: 0.1em; }
+
+                .cicEmpty {
+                    border: 1px dashed rgba(127,127,127,0.35); border-radius: 10px;
+                    padding: 2.2em 1.2em; text-align: center; opacity: 0.6; margin-top: 1.2em;
+                }
+
+                .cicItemHead {
+                    display: flex; justify-content: space-between; align-items: flex-start;
+                    gap: 1em; margin: 1.4em 0 0.2em;
+                }
+                .cicItemTitle { font-size: 1.15em; font-weight: 600; }
+                .cicItemMeta { font-size: 0.88em; opacity: 0.65; margin-top: 0.15em; }
+
+                .cicWarn {
+                    margin: 0.9em 0 0.2em; padding: 0.7em 0.9em; border-radius: 8px;
+                    font-size: 0.9em; line-height: 1.45;
+                    border: 1px solid rgba(255,179,0,0.45); background: rgba(255,179,0,0.10);
+                }
+
+                .cicSubTable td { vertical-align: top; }
+                .cicSubTable .cicFileName {
+                    font-size: 0.9em; opacity: 0.8; word-break: break-all;
+                    font-variant-numeric: tabular-nums;
+                }
+
+                /* Where a track came from, which decides what may be done to it. The
+                   two Cicerone wrote are tinted; everything else is neutral, because
+                   the distinction that matters is ours against not-ours. */
+                .cicKind {
+                    display: inline-block; padding: 0.1em 0.55em; border-radius: 4px;
+                    font-size: 0.78em; font-weight: 600; letter-spacing: 0.02em;
+                    border: 1px solid rgba(127,127,127,0.45); opacity: 0.85; white-space: nowrap;
+                }
+                .cicKind.cicKindRepaired { color: #4dd0e1; border-color: currentColor; opacity: 1; }
+                .cicKind.cicKindHeard { color: #9575cd; border-color: currentColor; opacity: 1; }
+
+                .cicActions { display: flex; gap: 0.35em; flex-wrap: wrap; justify-content: flex-end; }
+                .cicActions .cicRowButton { padding: 0.25em 0.6em; font-size: 0.9em; }
+
+                /* Destructive, and it looks it only once it is armed. A delete button
+                   that is red from the moment the page loads is red for the ninety-nine
+                   times somebody is not deleting anything. */
+                .cicRowButton.cicDanger { color: #ef5350; border-color: rgba(239,83,80,0.5); }
+                .cicRowButton.cicDanger:hover { background: rgba(239,83,80,0.12); }
+                .cicRowButton.cicArmed {
+                    color: #fff; background: #ef5350; border-color: #ef5350; font-weight: 600;
+                }
+                .cicRowButton:disabled { opacity: 0.4; cursor: default; }
+                .cicRowButton.is-active { background: rgba(255,255,255,0.12); }
+
+                .cicEditorTabs {
+                    display: flex; gap: 0.3em; margin: 0 0 1em;
+                    border-bottom: 1px solid rgba(127,127,127,0.25);
+                }
+                .cicEditorPanel { margin-top: 0.2em; }
+
+                .cicChips { display: flex; flex-wrap: wrap; gap: 0.4em; margin-top: 0.9em; }
+                .cicChip {
+                    background: none; border: 1px solid rgba(127,127,127,0.4); border-radius: 999px;
+                    color: inherit; font: inherit; font-size: 0.86em;
+                    padding: 0.25em 0.8em; cursor: pointer;
+                }
+                .cicChip:hover { background: rgba(255,255,255,0.08); }
+
+                .cicTextArea {
+                    width: 100%; box-sizing: border-box; min-height: 22em; resize: vertical;
+                    background: rgba(0,0,0,0.22); color: inherit;
+                    border: 1px solid rgba(127,127,127,0.35); border-radius: 6px;
+                    padding: 0.7em 0.8em; line-height: 1.5;
+                    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+                    font-size: 0.86em; white-space: pre; overflow-wrap: normal; overflow-x: auto;
+                }
+
+                .cicBusy { opacity: 0.55; pointer-events: none; }
+
                 .cicScroll { max-height: 26em; overflow-y: auto; margin-top: 0.6em; }
                 .cicMono { font-variant-numeric: tabular-nums; }
                 .cicRight { text-align: right; }
@@ -141,13 +238,16 @@
             </h2>
             <div class="cicNote" style="margin-bottom:0">
                 Checks that a subtitle track is the language it claims to be and is timed to the dialogue it
-                sits over &mdash; by cutting real audio out of the file at several points and listening to it.
+                sits over &mdash; by comparing when the subtitles say somebody is speaking against when the
+                audio says so. That costs nothing and runs locally. A transcriber is needed only to
+                <em>write</em> a track for something that has none.
             </div>
 
             <div class="cicTabs" role="tablist">
                 <button type="button" class="cicTab is-active" role="tab" data-panel="models">Models</button>
                 <button type="button" class="cicTab" role="tab" data-panel="languages">Languages</button>
                 <button type="button" class="cicTab" role="tab" data-panel="sync">Sync</button>
+                <button type="button" class="cicTab" role="tab" data-panel="subtitles">Subtitles</button>
                 <button type="button" class="cicTab" role="tab" data-panel="repair">Repair</button>
                 <button type="button" class="cicTab" role="tab" data-panel="run">Run</button>
                 <button type="button" class="cicTab" role="tab" data-panel="report">Report</button>
@@ -287,11 +387,66 @@
                     <div class="cicNote">
                         <strong>One measurement is worse than none.</strong> A single-point check reports a
                         frame-rate-mismatched file as perfect, because it <em>is</em> perfect wherever you
-                        happened to look &mdash; and now you believe it. Two anchors is the minimum that can see a
-                        drift at all; five is what makes the answer survive one of them landing in a silence.
+                        happened to look &mdash; and now you believe it. Two measurements is the minimum that can
+                        see a drift at all; a dozen is what makes the answer survive several of them landing in a
+                        silence.
                     </div>
 
-                    <div class="cicGrid">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="SyncMethod">How timing is measured</label>
+                        <select is="emby-select" id="SyncMethod" class="emby-select">
+                            <option value="SpeechActivity">Speech activity &mdash; free, local, whole file</option>
+                            <option value="Transcript">Transcript &mdash; costs money, reads the words</option>
+                        </select>
+                        <div class="fieldDescription cicNote">
+                            <strong>Sync is a question about when somebody spoke, not about what they said.</strong>
+                            Speech activity answers it by finding every stretch of the film that is not silence and
+                            sliding the subtitle track over it until the two agree &mdash; no model, no network, no
+                            bill, and it reads the entire file rather than the few windows a per-item charge would
+                            stretch to. It is both the cheaper option and the better evidence.
+                            <br /><br />
+                            The transcript method is kept for the one thing it can still do better: telling two
+                            films apart by their words rather than by the rhythm of their dialogue. It costs a few
+                            minutes of audio per item, every item, forever.
+                        </div>
+                    </div>
+
+                    <div class="cicVadOnly">
+                        <div class="cicGrid">
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="VadWindowCount">Windows per item</label>
+                                <input is="emby-input" type="number" id="VadWindowCount" class="emby-input"
+                                       min="2" max="64" step="1" />
+                                <div class="fieldDescription cicNote">
+                                    Twelve rather than five, because these are free. Every window is another point
+                                    the drift line is fitted through.
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="VadNoiseFloorDb">Silence threshold (dBFS)</label>
+                                <input is="emby-input" type="number" id="VadNoiseFloorDb" class="emby-input"
+                                       min="-60" max="-10" step="1" />
+                                <div class="fieldDescription cicNote">
+                                    Read after the audio is band-limited to the range a voice occupies, which is
+                                    what lets one number work across films. Lower it if quiet films come back
+                                    unmeasurable; raise it if loud ones do.
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="VadMinSilenceSeconds">Shortest silence (seconds)</label>
+                                <input is="emby-input" type="number" id="VadMinSilenceSeconds" class="emby-input"
+                                       min="0.05" max="2" step="0.05" />
+                                <div class="fieldDescription cicNote">
+                                    Longer than the stop in the middle of a word and shorter than the gap between
+                                    two sentences, so a spoken line is one stretch rather than one per syllable.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cicGrid cicAnchorOnly">
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="AnchorCount">Windows per item</label>
                             <input is="emby-input" type="number" id="AnchorCount" class="emby-input"
@@ -326,7 +481,7 @@
                         </div>
                     </div>
 
-                    <div class="cicGrid">
+                    <div class="cicGrid cicAnchorOnly">
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="HeadTrimPercent">Skip at start (%)</label>
                             <input is="emby-input" type="number" id="HeadTrimPercent" class="emby-input"
@@ -338,7 +493,7 @@
                                    min="0" max="45" step="0.5" />
                         </div>
                     </div>
-                    <div class="cicNote">
+                    <div class="cicNote cicAnchorOnly">
                         Distributor logos and a cold open at one end, a credit crawl at the other &mdash; the two
                         parts of a film least likely to contain plain dialogue. The head is also where a ripper's
                         signature sits, which is the most distinctive text in a subtitle file and belongs to
@@ -401,6 +556,135 @@
                             local server that would rather not decode.
                         </div>
                     </div>
+                </div>
+
+                <!-- ================= SUBTITLES ================= -->
+                <div class="cicPanel" data-panel="subtitles">
+
+                    <div class="cicNote">
+                        Everything one item has by way of subtitles, in one place: the tracks inside the file, the
+                        sidecars beside it, and anything Cicerone has written itself. Save a copy of any of them,
+                        nudge the timing, edit the text, or delete the ones that have accumulated.
+                        <br /><br />
+                        <strong>Cicerone never overwrites a file it did not write.</strong> Editing somebody
+                        else's track saves a copy and leaves the original alone; editing one of Cicerone's own
+                        saves over it, because putting that back costs a re-run. Deleting is the exception, and
+                        deliberately so &mdash; a manager exists so you can remove the four subtitle files that
+                        have piled up beside a film, and it asks first.
+                    </div>
+
+                    <div class="cicFind">
+                        <input is="emby-input" type="text" id="SubtitleSearch" class="emby-input"
+                               placeholder="Search for a film or episode&hellip;" autocomplete="off" />
+                        <button type="button" is="emby-button" id="SubtitleSearchGo"
+                                class="emby-button raised"><span>Search</span></button>
+                    </div>
+                    <div id="SubtitleSearchResults" class="cicResults cicHide"></div>
+
+                    <div id="SubtitleEmpty" class="cicEmpty">
+                        Search above, or paste an item id, to see everything it has.
+                    </div>
+
+                    <div id="SubtitleItem" class="cicHide">
+
+                        <div class="cicItemHead">
+                            <div>
+                                <div class="cicItemTitle" id="SubtitleItemTitle"></div>
+                                <div class="cicItemMeta" id="SubtitleItemMeta"></div>
+                            </div>
+                            <button type="button" class="cicRowButton" id="SubtitleRefresh">Refresh</button>
+                        </div>
+
+                        <div id="SubtitleWarning" class="cicWarn cicHide"></div>
+
+                        <table class="cicTable cicSubTable">
+                            <thead>
+                                <tr>
+                                    <th>Language</th>
+                                    <th>Source</th>
+                                    <th>File</th>
+                                    <th class="cicNarrow cicRight">Size</th>
+                                    <th class="cicNarrow">Last verdict</th>
+                                    <th class="cicNarrow"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="SubtitleRows"></tbody>
+                        </table>
+
+                        <div class="cicCard" id="SubtitleMissingCard">
+                            <div class="cicCardTitle">Languages this item does not have</div>
+                            <div id="SubtitleMissing" class="cicNote" style="margin-bottom:0.6em"></div>
+                            <div class="cicFind" style="margin:0">
+                                <select is="emby-select" id="TranscribeLanguage" class="emby-select"></select>
+                                <button type="button" is="emby-button" id="TranscribeItem"
+                                        class="emby-button raised"><span>Write one by listening</span></button>
+                            </div>
+                            <div class="cicNote" id="TranscribeCost" style="margin:0.6em 0 0"></div>
+                        </div>
+                    </div>
+
+                    <!-- The editor. A drawer under the table rather than a modal:
+                         everything above it is the context for what is being edited,
+                         and a dialog that covers it makes you close it to remember
+                         which of four English tracks you opened. -->
+                    <div id="SubtitleEditor" class="cicCard cicHide">
+                        <div class="cicItemHead" style="margin-bottom:0.7em">
+                            <div class="cicCardTitle" id="EditorTitle" style="margin:0"></div>
+                            <button type="button" class="cicRowButton" id="EditorClose">Close</button>
+                        </div>
+
+                        <div class="cicEditorTabs">
+                            <button type="button" class="cicTab is-active" data-editor="timing">Timing</button>
+                            <button type="button" class="cicTab" data-editor="text">Text</button>
+                        </div>
+
+                        <div class="cicEditorPanel" data-editor="timing">
+                            <div class="cicNote">
+                                Positive delays the track; negative pulls it earlier. The scale is for a file timed
+                                against a different transfer &mdash; the buttons below are the ratios that actually
+                                occur, and one of them is almost certainly what a drifting file needs.
+                            </div>
+
+                            <div class="cicGrid">
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="EditorOffset">Shift (seconds)</label>
+                                    <input is="emby-input" type="number" id="EditorOffset" class="emby-input"
+                                           step="0.1" value="0" />
+                                </div>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="EditorScale">Speed factor</label>
+                                    <input is="emby-input" type="number" id="EditorScale" class="emby-input"
+                                           step="0.00001" value="1" />
+                                </div>
+                            </div>
+
+                            <div class="cicChips" id="EditorRatios"></div>
+
+                            <div style="margin-top:1em; display:flex; gap:0.6em; flex-wrap:wrap;">
+                                <button type="button" is="emby-button" id="EditorApplyTiming"
+                                        class="emby-button raised"><span>Apply timing</span></button>
+                                <button type="button" class="cicRowButton" id="EditorResetTiming">Reset</button>
+                            </div>
+                        </div>
+
+                        <div class="cicEditorPanel cicHide" data-editor="text">
+                            <div class="cicNote">
+                                The track as SRT, whatever it started as &mdash; read through the server's own
+                                subtitle encoder, which is the same route Cicerone measures through, so this is
+                                exactly what it saw.
+                            </div>
+                            <textarea id="EditorText" class="cicTextArea" spellcheck="false"></textarea>
+                            <div style="margin-top:0.8em; display:flex; gap:0.6em; flex-wrap:wrap;">
+                                <button type="button" is="emby-button" id="EditorSaveText"
+                                        class="emby-button raised"><span>Save text</span></button>
+                                <button type="button" class="cicRowButton" id="EditorReloadText">Reload</button>
+                            </div>
+                        </div>
+
+                        <div class="cicStatusLine" id="EditorStatus"></div>
+                    </div>
+
+                    <div class="cicStatusLine" id="SubtitleStatus"></div>
                 </div>
 
                 <!-- ================= REPAIR ================= -->
@@ -511,6 +795,20 @@
 
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="TranscribeWhenMissing" />
+                            <span>Write a track for items that have none</span>
+                        </label>
+                        <div class="fieldDescription cicNote">
+                            <strong>The only thing left that costs money.</strong> Checking is free now; this is
+                            not. It sends a whole film&rsquo;s audio to your transcriber for every item with no
+                            readable track in a preferred language &mdash; a hundred times what a check used to
+                            cost, for something that was not there before rather than an opinion about something
+                            that was. The audio budget below is what bounds it.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="RecheckExisting" />
                             <span>Check items that have already been checked</span>
                         </label>
@@ -532,6 +830,26 @@
                                 The one setting standing between a first run over an unexamined library and a bill
                                 nobody agreed to. In minutes of audio rather than dollars because minutes are what
                                 Cicerone can count exactly and prices change underneath it. 0 removes the ceiling.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TranscribeChunkSeconds">Transcription piece (seconds)</label>
+                            <input is="emby-input" type="number" id="TranscribeChunkSeconds" class="emby-input"
+                                   min="30" max="3600" step="30" />
+                            <div class="fieldDescription cicNote">
+                                How much of a film goes to the transcriber in one request. A failed request costs
+                                its whole piece, and ten minutes is a tolerable amount of work to lose and repeat.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="HeardSuffix">Marker for tracks Cicerone heard</label>
+                            <input is="emby-input" type="text" id="HeardSuffix" class="emby-input" />
+                            <div class="fieldDescription cicNote">
+                                Kept distinct from the repair marker, because the two are not the same kind of
+                                file: one is your subtitles with the timings corrected, the other is a
+                                machine&rsquo;s account of what it heard.
                             </div>
                         </div>
 
@@ -690,6 +1008,7 @@
             var PROVIDERS = ['OpenAi', 'OpenAiCompatible', 'Google'];
             var CLIP_FORMATS = ['Opus', 'Mp3', 'Wav'];
             var REPAIR_MODES = ['Off', 'WriteSidecar', 'WriteSidecarAndRefresh'];
+            var SYNC_METHODS = ['SpeechActivity', 'Transcript'];
 
             var VERDICTS = [
                 'InSync', 'Offset', 'Drifting', 'Mismatched', 'WrongLanguage', 'NoDialogue', 'Unknown'
@@ -957,6 +1276,15 @@
                     page.querySelector('#PreferredLanguages').value = config.PreferredLanguages || '';
                     page.querySelector('#VerifyLanguage').checked = config.VerifyLanguage !== false;
 
+                    page.querySelector('#SyncMethod').value =
+                        enumName(config.SyncMethod, SYNC_METHODS, 'SpeechActivity');
+                    page.querySelector('#VadWindowCount').value = config.VadWindowCount || 12;
+                    page.querySelector('#VadNoiseFloorDb').value =
+                        config.VadNoiseFloorDb === undefined ? -30 : config.VadNoiseFloorDb;
+                    page.querySelector('#VadMinSilenceSeconds').value =
+                        config.VadMinSilenceSeconds === undefined ? 0.3 : config.VadMinSilenceSeconds;
+                    showMethod();
+
                     page.querySelector('#AnchorCount').value = config.AnchorCount;
                     page.querySelector('#AnchorWindowSeconds').value = config.AnchorWindowSeconds;
                     page.querySelector('#MaxOffsetSeconds').value = config.MaxOffsetSeconds;
@@ -977,6 +1305,9 @@
                     page.querySelector('#IncludeEpisodes').checked = !!config.IncludeEpisodes;
                     page.querySelector('#RecheckExisting').checked = !!config.RecheckExisting;
                     page.querySelector('#MaxConcurrency').value = config.MaxConcurrency || 0;
+                    page.querySelector('#TranscribeWhenMissing').checked = !!config.TranscribeWhenMissing;
+                    page.querySelector('#TranscribeChunkSeconds').value = config.TranscribeChunkSeconds || 600;
+                    page.querySelector('#HeardSuffix').value = config.HeardSuffix || 'cicerone-heard';
                     page.querySelector('#AudioMinuteBudget').value =
                         config.AudioMinuteBudget === undefined ? 240 : config.AudioMinuteBudget;
 
@@ -1015,6 +1346,11 @@
                     config.PreferredLanguages = page.querySelector('#PreferredLanguages').value;
                     config.VerifyLanguage = page.querySelector('#VerifyLanguage').checked;
 
+                    config.SyncMethod = page.querySelector('#SyncMethod').value;
+                    config.VadWindowCount = num('#VadWindowCount', 12);
+                    config.VadNoiseFloorDb = num('#VadNoiseFloorDb', -30);
+                    config.VadMinSilenceSeconds = num('#VadMinSilenceSeconds', 0.3);
+
                     config.AnchorCount = num('#AnchorCount', 5);
                     config.AnchorWindowSeconds = num('#AnchorWindowSeconds', 30);
                     config.MaxOffsetSeconds = num('#MaxOffsetSeconds', 120);
@@ -1039,6 +1375,9 @@
                     config.IncludeEpisodes = page.querySelector('#IncludeEpisodes').checked;
                     config.RecheckExisting = page.querySelector('#RecheckExisting').checked;
                     config.MaxConcurrency = num('#MaxConcurrency', 0);
+                    config.TranscribeWhenMissing = page.querySelector('#TranscribeWhenMissing').checked;
+                    config.TranscribeChunkSeconds = num('#TranscribeChunkSeconds', 600);
+                    config.HeardSuffix = page.querySelector('#HeardSuffix').value || 'cicerone-heard';
                     config.AudioMinuteBudget = num('#AudioMinuteBudget', 240);
 
                     return ApiClient.updatePluginConfiguration(pluginId, config);
@@ -1398,6 +1737,560 @@
                 }, function () { });
             }
 
+
+            /*
+             * Shows only the settings the chosen method actually reads.
+             *
+             * The two share almost nothing: anchors, window lengths and the head and
+             * tail trims exist because a transcript is bought by the second, and none
+             * of them means anything to a correlation that reads the whole file. Left
+             * on screen they are four controls that silently do nothing, which is worse
+             * than four controls that are not there.
+             */
+            function showMethod() {
+                var method = page.querySelector('#SyncMethod').value;
+                var i;
+
+                var vad = page.querySelectorAll('.cicVadOnly');
+                for (i = 0; i < vad.length; i++) {
+                    vad[i].classList.toggle('cicHide', method !== 'SpeechActivity');
+                }
+
+                var anchors = page.querySelectorAll('.cicAnchorOnly');
+                for (i = 0; i < anchors.length; i++) {
+                    anchors[i].classList.toggle('cicHide', method === 'SpeechActivity');
+                }
+            }
+
+            /* -------------------------------------------------- subtitle manager */
+
+            /*
+             * The manager keeps the inventory it last fetched and re-renders from it.
+             * Nothing is keyed by row position: every action names a source by the id
+             * the server gave it, and the server looks that id up against a freshly
+             * built listing before touching anything. A stale page therefore fails to
+             * find the file rather than acting on the wrong one.
+             */
+            var inventory = null;
+            var editing = null;
+            var armedDelete = null;
+
+            function subtitleStatus(text, element) {
+                (element || page.querySelector('#SubtitleStatus')).textContent = text || '';
+            }
+
+            function kindLabel(kind) {
+                if (kind === 'Embedded') { return 'in the file'; }
+                if (kind === 'Repaired') { return 'Cicerone · retimed'; }
+                if (kind === 'Heard') { return 'Cicerone · heard'; }
+                return 'sidecar';
+            }
+
+            function bytes(n) {
+                var b = Number(n) || 0;
+                if (b <= 0) { return '—'; }
+                if (b < 1024) { return b + ' B'; }
+                if (b < 1024 * 1024) { return (b / 1024).toFixed(1) + ' KB'; }
+                return (b / (1024 * 1024)).toFixed(1) + ' MB';
+            }
+
+            function searchItems() {
+                var query = page.querySelector('#SubtitleSearch').value.trim();
+                var results = page.querySelector('#SubtitleSearchResults');
+
+                if (query.length < 2) {
+                    results.classList.add('cicHide');
+                    return;
+                }
+
+                // A 32-character hex string is an item id rather than a title. Pasting
+                // one out of a Jellyfin URL is how anybody who already knows which item
+                // they want will reach for this.
+                if (/^[0-9a-fA-F]{32}$/.test(query.replace(/-/g, ''))) {
+                    results.classList.add('cicHide');
+                    loadInventory(query.replace(/-/g, ''));
+                    return;
+                }
+
+                subtitleStatus('Searching…');
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Search', { query: query, limit: 30 }),
+                    dataType: 'json'
+                }).then(function (items) {
+                    subtitleStatus('');
+                    results.innerHTML = '';
+                    results.classList.remove('cicHide');
+
+                    if (!items || items.length === 0) {
+                        var none = document.createElement('div');
+                        none.className = 'cicResult cicNote';
+                        none.style.margin = '0';
+                        none.textContent = 'Nothing matched. Only films and episodes with a file are listed.';
+                        results.appendChild(none);
+                        return;
+                    }
+
+                    items.forEach(function (item) {
+                        var button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'cicResult';
+
+                        var name = document.createElement('div');
+                        name.className = 'cicResultName';
+                        name.textContent = item.Series ? item.Series + ' — ' + item.Name : item.Name;
+                        button.appendChild(name);
+
+                        var meta = document.createElement('div');
+                        meta.className = 'cicResultMeta';
+                        meta.textContent = [
+                            item.Kind,
+                            item.Year || '',
+                            item.RuntimeSeconds ? duration(item.RuntimeSeconds) : ''
+                        ].filter(Boolean).join(' · ');
+                        button.appendChild(meta);
+
+                        button.addEventListener('click', function () {
+                            results.classList.add('cicHide');
+                            loadInventory(item.Id);
+                        });
+
+                        results.appendChild(button);
+                    });
+                }, function () {
+                    subtitleStatus('The search failed.');
+                });
+            }
+
+            function loadInventory(itemId) {
+                subtitleStatus('Loading…');
+                closeEditor();
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Subtitles/' + itemId),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    inventory = payload;
+                    subtitleStatus('');
+                    renderInventory();
+                }, function () {
+                    subtitleStatus('That item could not be read.');
+                });
+            }
+
+            function renderInventory() {
+                var empty = page.querySelector('#SubtitleEmpty');
+                var wrap = page.querySelector('#SubtitleItem');
+
+                if (!inventory) {
+                    empty.classList.remove('cicHide');
+                    wrap.classList.add('cicHide');
+                    return;
+                }
+
+                empty.classList.add('cicHide');
+                wrap.classList.remove('cicHide');
+                armedDelete = null;
+
+                page.querySelector('#SubtitleItemTitle').textContent =
+                    inventory.SeriesName ? inventory.SeriesName + ' — ' + inventory.Name : inventory.Name;
+
+                page.querySelector('#SubtitleItemMeta').textContent = [
+                    inventory.RuntimeSeconds ? duration(inventory.RuntimeSeconds) : '',
+                    inventory.Sources.length + (inventory.Sources.length === 1 ? ' track' : ' tracks'),
+                    inventory.AudioLanguages.length ? 'audio: ' + inventory.AudioLanguages.join(', ') : '',
+                    inventory.MediaPath || ''
+                ].filter(Boolean).join(' · ');
+
+                var warning = page.querySelector('#SubtitleWarning');
+                if (inventory.CanWriteBeside === false) {
+                    warning.classList.remove('cicHide');
+                    warning.textContent = 'The folder this film lives in is not writable by Jellyfin, so '
+                        + 'anything saved here goes to Cicerone’s data directory instead. Jellyfin will '
+                        + 'not offer a subtitle to viewers from there — it is somewhere to copy out of.';
+                } else {
+                    warning.classList.add('cicHide');
+                }
+
+                renderSources();
+                renderMissing();
+            }
+
+            function renderSources() {
+                var body = page.querySelector('#SubtitleRows');
+                body.innerHTML = '';
+
+                if (inventory.Sources.length === 0) {
+                    var row = document.createElement('tr');
+                    var cell = document.createElement('td');
+                    cell.colSpan = 6;
+                    cell.className = 'cicNote';
+                    cell.style.paddingTop = '1em';
+                    cell.textContent = 'This item has no subtitles at all — not in the file and not beside it.';
+                    row.appendChild(cell);
+                    body.appendChild(row);
+                    return;
+                }
+
+                inventory.Sources.forEach(function (source) {
+                    body.appendChild(sourceRow(source));
+                });
+            }
+
+            function sourceRow(source) {
+                var row = document.createElement('tr');
+
+                var language = document.createElement('td');
+                language.textContent = source.Label;
+                if (source.Title) {
+                    var title = document.createElement('div');
+                    title.className = 'cicNote';
+                    title.style.margin = '0.15em 0 0';
+                    title.textContent = source.Title;
+                    language.appendChild(title);
+                }
+                row.appendChild(language);
+
+                var kind = document.createElement('td');
+                var origin = document.createElement('span');
+                origin.className = 'cicKind cicKind' + source.Kind;
+                origin.textContent = kindLabel(source.Kind);
+                kind.appendChild(origin);
+                row.appendChild(kind);
+
+                var file = document.createElement('td');
+                file.className = 'cicFileName';
+                file.textContent = source.FileName
+                    || ('stream #' + source.StreamIndex);
+                row.appendChild(file);
+
+                var size = document.createElement('td');
+                size.className = 'cicNarrow cicRight cicMono';
+                size.textContent = source.Path ? bytes(source.SizeBytes) : '—';
+                row.appendChild(size);
+
+                var verdict = document.createElement('td');
+                verdict.className = 'cicNarrow';
+                if (source.Verdict) {
+                    var badge = pill(source.Verdict);
+                    badge.title = source.Detail || '';
+                    verdict.appendChild(badge);
+                } else {
+                    verdict.textContent = '—';
+                    verdict.style.opacity = '0.5';
+                }
+                row.appendChild(verdict);
+
+                row.appendChild(actionCell(source));
+                return row;
+            }
+
+            function actionCell(source) {
+                var cell = document.createElement('td');
+                cell.className = 'cicNarrow';
+
+                var actions = document.createElement('div');
+                actions.className = 'cicActions';
+
+                if (source.IsText) {
+                    actions.appendChild(button('Edit', function () { openEditor(source); }));
+                }
+
+                // Extraction is what makes an embedded track manageable at all: it
+                // cannot be retimed or removed where it is without rewriting the film,
+                // and Cicerone will not do that.
+                if (!source.Path) {
+                    if (source.IsText) {
+                        actions.appendChild(button('Save a copy', function () {
+                            act('Extract', source, 'POST');
+                        }));
+                    }
+                } else {
+                    actions.appendChild(deleteButton(source));
+                }
+
+                cell.appendChild(actions);
+                return cell;
+            }
+
+            function button(text, handler) {
+                var element = document.createElement('button');
+                element.type = 'button';
+                element.className = 'cicRowButton';
+                element.textContent = text;
+                element.addEventListener('click', handler);
+                return element;
+            }
+
+            /*
+             * Two presses, and the second one is a different button to look at.
+             * A confirm() dialog would do the same job and be ignored the same way;
+             * making the button itself say "Really delete?" puts the question where
+             * the hand already is and keeps it next to the row it applies to.
+             */
+            function deleteButton(source) {
+                var element = button('Delete', function () {
+                    if (armedDelete !== source.Id) {
+                        armedDelete = source.Id;
+                        renderSources();
+                        return;
+                    }
+
+                    armedDelete = null;
+                    act('', source, 'DELETE');
+                });
+
+                element.classList.add('cicDanger');
+
+                if (armedDelete === source.Id) {
+                    element.classList.add('cicArmed');
+                    element.textContent = source.Ours ? 'Really delete?' : 'Delete somebody else’s file?';
+                }
+
+                return element;
+            }
+
+            function act(verb, source, method) {
+                var url = 'Cicerone/Subtitles/' + inventory.ItemId + '/' + source.Id + (verb ? '/' + verb : '');
+                subtitleStatus('Working…');
+
+                ApiClient.ajax({
+                    type: method,
+                    url: ApiClient.getUrl(url),
+                    dataType: 'json'
+                }).then(function (outcome) {
+                    subtitleStatus(outcome.Message);
+                    loadInventoryQuietly();
+                }, function () {
+                    subtitleStatus('That did not work.');
+                });
+            }
+
+            function loadInventoryQuietly() {
+                if (!inventory) { return; }
+                var id = inventory.ItemId;
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Subtitles/' + id),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    inventory = payload;
+                    renderInventory();
+                }, function () { });
+            }
+
+            function renderMissing() {
+                var card = page.querySelector('#SubtitleMissingCard');
+                var missing = inventory.Missing || [];
+                var select = page.querySelector('#TranscribeLanguage');
+
+                if (missing.length === 0) {
+                    card.classList.add('cicHide');
+                    return;
+                }
+
+                card.classList.remove('cicHide');
+                page.querySelector('#SubtitleMissing').textContent =
+                    'No readable track in: ' + missing.join(', ')
+                    + '. An image track or a forced one does not count — neither can be read.';
+
+                select.innerHTML = '';
+                missing.forEach(function (language) {
+                    var option = document.createElement('option');
+                    option.value = language;
+                    option.textContent = language;
+                    select.appendChild(option);
+                });
+
+                var minutes = inventory.TranscriptionMinutes || 0;
+                page.querySelector('#TranscribeCost').textContent =
+                    'This sends the whole ' + Math.round(minutes) + ' minutes to your transcriber, a piece at a '
+                    + 'time — not the two and a half minutes a check used to cost. On a local whisper server that '
+                    + 'is free and slow; on a hosted one it is billed per minute of audio.';
+            }
+
+            function transcribe() {
+                var language = page.querySelector('#TranscribeLanguage').value;
+                subtitleStatus('Starting…');
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('Cicerone/Transcribe/' + inventory.ItemId, { language: language }),
+                    dataType: 'json'
+                }).then(function () {
+                    subtitleStatus('Listening to the whole film. Watch the Run tab — this takes minutes, '
+                        + 'and the track appears here when it lands.');
+                }, function () {
+                    subtitleStatus('Could not start — a run may already be going.');
+                });
+            }
+
+            /* ------------------------------------------------------------- editor */
+
+            function openEditor(source) {
+                editing = source;
+
+                page.querySelector('#SubtitleEditor').classList.remove('cicHide');
+                page.querySelector('#EditorTitle').textContent =
+                    'Editing ' + source.Label + ' · ' + (source.FileName || 'stream #' + source.StreamIndex);
+
+                page.querySelector('#EditorOffset').value = '0';
+                page.querySelector('#EditorScale').value = '1';
+                page.querySelector('#EditorText').value = '';
+
+                editorStatus(source.Ours
+                    ? 'This is Cicerone’s own file, so saving writes over it.'
+                    : 'Saving leaves this file alone and writes a corrected copy beside it.');
+
+                renderRatios();
+                switchEditorTab('timing');
+                page.querySelector('#SubtitleEditor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            function closeEditor() {
+                editing = null;
+                page.querySelector('#SubtitleEditor').classList.add('cicHide');
+            }
+
+            function editorStatus(text) {
+                page.querySelector('#EditorStatus').textContent = text || '';
+            }
+
+            function switchEditorTab(name) {
+                var tabs = page.querySelectorAll('.cicEditorTabs .cicTab');
+                var i;
+
+                for (i = 0; i < tabs.length; i++) {
+                    tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-editor') === name);
+                }
+
+                var panels = page.querySelectorAll('.cicEditorPanel');
+                for (i = 0; i < panels.length; i++) {
+                    panels[i].classList.toggle(
+                        'cicHide', panels[i].getAttribute('data-editor') !== name);
+                }
+
+                if (name === 'text' && !page.querySelector('#EditorText').value) {
+                    loadEditorText();
+                }
+            }
+
+            /*
+             * The frame rate ratios, as buttons. A drifting file needs one of about six
+             * numbers and nobody remembers that 23.976/25 is 0.95904 — offering the
+             * ratio by name is the difference between a usable control and a field that
+             * requires a calculator.
+             */
+            function renderRatios() {
+                var rates = [23.976, 24, 25, 29.97, 30];
+                var host = page.querySelector('#EditorRatios');
+                host.innerHTML = '';
+
+                rates.forEach(function (from) {
+                    rates.forEach(function (to) {
+                        if (from === to) { return; }
+
+                        var ratio = to / from;
+                        if (ratio < 0.9 || ratio > 1.1) { return; }
+
+                        var chip = document.createElement('button');
+                        chip.type = 'button';
+                        chip.className = 'cicChip';
+                        chip.textContent = from + ' → ' + to;
+                        chip.title = 'Speed factor ' + ratio.toFixed(5);
+                        chip.addEventListener('click', function () {
+                            page.querySelector('#EditorScale').value = ratio.toFixed(6);
+                        });
+
+                        host.appendChild(chip);
+                    });
+                });
+            }
+
+            function loadEditorText() {
+                if (!editing) { return; }
+                editorStatus('Loading…');
+
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('Cicerone/Subtitles/' + inventory.ItemId + '/' + editing.Id),
+                    dataType: 'json'
+                }).then(function (payload) {
+                    if (payload.Ok) {
+                        page.querySelector('#EditorText').value = payload.Text;
+                        editorStatus('');
+                    } else {
+                        editorStatus(payload.Message || 'That track could not be read.');
+                    }
+                }, function () {
+                    editorStatus('That track could not be read.');
+                });
+            }
+
+            function applyTiming() {
+                if (!editing) { return; }
+
+                var offset = Number(page.querySelector('#EditorOffset').value) || 0;
+                var scale = Number(page.querySelector('#EditorScale').value) || 1;
+
+                if (offset === 0 && scale === 1) {
+                    editorStatus('That would not move anything.');
+                    return;
+                }
+
+                editorStatus('Applying…');
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl(
+                        'Cicerone/Subtitles/' + inventory.ItemId + '/' + editing.Id + '/Retime'),
+                    data: JSON.stringify({ OffsetSeconds: offset, Scale: scale }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (outcome) {
+                    editorStatus(outcome.Message);
+                    if (outcome.Ok) {
+                        page.querySelector('#EditorOffset').value = '0';
+                        page.querySelector('#EditorScale').value = '1';
+                        page.querySelector('#EditorText').value = '';
+                        loadInventoryQuietly();
+                    }
+                }, function () {
+                    editorStatus('That did not work.');
+                });
+            }
+
+            function saveText() {
+                if (!editing) { return; }
+                var text = page.querySelector('#EditorText').value;
+
+                if (!text.trim()) {
+                    editorStatus('There is nothing to save.');
+                    return;
+                }
+
+                editorStatus('Saving…');
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl(
+                        'Cicerone/Subtitles/' + inventory.ItemId + '/' + editing.Id + '/Save'),
+                    data: JSON.stringify({ Text: text }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (outcome) {
+                    editorStatus(outcome.Message);
+                    if (outcome.Ok) {
+                        loadInventoryQuietly();
+                    }
+                }, function () {
+                    editorStatus('That did not work.');
+                });
+            }
+
             /* ----------------------------------------------------------------- wire */
 
             page.addEventListener('pageshow', function () {
@@ -1461,6 +2354,34 @@
             page.querySelector('#RefreshReport').addEventListener('click', refreshReport);
             page.querySelector('#VerdictFilter').addEventListener('change', refreshReport);
             page.querySelector('#ClearReports').addEventListener('click', clearReports);
+
+            page.querySelector('#SubtitleSearchGo').addEventListener('click', searchItems);
+            page.querySelector('#SubtitleSearch').addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    searchItems();
+                }
+            });
+            page.querySelector('#SubtitleRefresh').addEventListener('click', loadInventoryQuietly);
+            page.querySelector('#TranscribeItem').addEventListener('click', transcribe);
+            page.querySelector('#EditorClose').addEventListener('click', closeEditor);
+            page.querySelector('#EditorApplyTiming').addEventListener('click', applyTiming);
+            page.querySelector('#EditorResetTiming').addEventListener('click', function () {
+                page.querySelector('#EditorOffset').value = '0';
+                page.querySelector('#EditorScale').value = '1';
+                editorStatus('');
+            });
+            page.querySelector('#EditorSaveText').addEventListener('click', saveText);
+            page.querySelector('#EditorReloadText').addEventListener('click', loadEditorText);
+
+            var editorTabs = page.querySelectorAll('.cicEditorTabs .cicTab');
+            for (var e = 0; e < editorTabs.length; e++) {
+                editorTabs[e].addEventListener('click', function (event) {
+                    switchEditorTab(event.currentTarget.getAttribute('data-editor'));
+                });
+            }
+
+            page.querySelector('#SyncMethod').addEventListener('change', showMethod);
         })();
     </script>
 </div>
